@@ -1,0 +1,50 @@
+{
+	"Name": "Sho Metrics - System Monitoring",
+	"Description": "显示实时系统指标，例如 CPU、GPU、内存、磁盘、网络、电池、传感器指标和 HTTP 指标。",
+	"com.ez.sho-metrics.catalog-metric": {
+		"Name": "高级传感器",
+		"Tooltip": "显示一个选定指标（如：LibreHardwareMonitor 数据）。"
+	},
+	"com.ez.sho-metrics.cpu": {
+		"Name": "CPU",
+		"Tooltip": "显示 CPU 指标。"
+	},
+	"com.ez.sho-metrics.custom-metric": {
+		"Name": "自定义指标",
+		"Tooltip": "显示来自自定义来源的指标，例如 HTTP JSON。"
+	},
+	"com.ez.sho-metrics.dense-multi-metric": {
+		"Name": "密集多指标",
+		"Tooltip": "在一个紧凑视图中显示多个指标。"
+	},
+	"com.ez.sho-metrics.disk": {
+		"Name": "磁盘",
+		"Tooltip": "显示磁盘指标。"
+	},
+	"com.ez.sho-metrics.gpu": {
+		"Name": "GPU",
+		"Tooltip": "显示 GPU 指标。"
+	},
+	"com.ez.sho-metrics.memory": {
+		"Name": "内存",
+		"Tooltip": "显示内存指标。"
+	},
+	"com.ez.sho-metrics.network": {
+		"Name": "网络",
+		"Tooltip": "显示网络指标。"
+	},
+	"com.ez.sho-metrics.stacked-metric": {
+		"Name": "堆叠指标",
+		"Tooltip": "在一个按键上轮播多个指标小组件。",
+		"Encoder": {
+			"TriggerDescription": {
+				"Push": "刷新",
+				"Rotate": "切换指标"
+			}
+		}
+	},
+	"com.ez.sho-metrics.system": {
+		"Name": "系统与电池",
+		"Tooltip": "显示系统和受支持设备的电池指标。"
+	}
+}

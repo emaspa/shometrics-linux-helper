@@ -1,0 +1,50 @@
+{
+	"Name": "Sho Metrics - System Monitoring",
+	"Description": "CPU、GPU、メモリ、ディスク、ネットワーク、バッテリー、センサーメトリクス、HTTP メトリクスなどのライブシステムメトリクスを表示します。",
+	"com.ez.sho-metrics.catalog-metric": {
+		"Name": "高度なセンサー",
+		"Tooltip": "LibreHardwareMonitor データなど、選択したメトリクスを 1 つ表示します。"
+	},
+	"com.ez.sho-metrics.cpu": {
+		"Name": "CPU",
+		"Tooltip": "CPU メトリクスを表示します。"
+	},
+	"com.ez.sho-metrics.custom-metric": {
+		"Name": "カスタムメトリクス",
+		"Tooltip": "HTTP JSON など、カスタムソースのメトリクスを表示します。"
+	},
+	"com.ez.sho-metrics.dense-multi-metric": {
+		"Name": "高密度マルチメトリクス",
+		"Tooltip": "複数のメトリクスを 1 つのコンパクトな表示にまとめます。"
+	},
+	"com.ez.sho-metrics.disk": {
+		"Name": "ディスク",
+		"Tooltip": "ディスクメトリクスを表示します。"
+	},
+	"com.ez.sho-metrics.gpu": {
+		"Name": "GPU",
+		"Tooltip": "GPU メトリクスを表示します。"
+	},
+	"com.ez.sho-metrics.memory": {
+		"Name": "メモリ",
+		"Tooltip": "メモリメトリクスを表示します。"
+	},
+	"com.ez.sho-metrics.network": {
+		"Name": "ネットワーク",
+		"Tooltip": "ネットワークメトリクスを表示します。"
+	},
+	"com.ez.sho-metrics.stacked-metric": {
+		"Name": "スタックメトリクス",
+		"Tooltip": "1 つのキーで複数のメトリクスウィジェットを切り替えます。",
+		"Encoder": {
+			"TriggerDescription": {
+				"Push": "更新",
+				"Rotate": "メトリクスを切り替え"
+			}
+		}
+	},
+	"com.ez.sho-metrics.system": {
+		"Name": "システムとバッテリー",
+		"Tooltip": "システムと対応デバイスのバッテリーメトリクスを表示します。"
+	}
+}

@@ -1,0 +1,1308 @@
+syntax = "proto3";
+
+package shometrics.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+import "shometrics/v1/metric_common.proto";
+
+option csharp_namespace = "ShoMetrics.Contracts.V1";
+
+// Persisted Stream Deck action settings.
+//
+// These messages are intended to be stored as plain ProtoJSON in the Stream
+// Deck SDK settings object. Do not wrap them in binary/base64 unless there is
+// a measured reason to give up readable exported profiles and logs.
+//
+// Stream Deck profiles are SDK-level layout snapshots that group actions.
+// They may embed this same JSON shape as per-action settings, but profile
+// layout itself is not modeled here.
+//
+// Stored settings are sparse. The application resolver owns defaults, global
+// cascade, controller/platform checks, and runtime-only facts.
+message StoredWidgetSettings {
+  // The stored widget identity is part of our contract. Stream Deck action
+  // UUIDs still route events to code, but they are not the only source of
+  // truth for what this instance displays. This keeps published action UUIDs
+  // stable while allowing future profile presets and internal refactors.
+  //
+  // New widget behavior gets a new oneof arm. Hardware quick-start actions
+  // should create one of these widget shapes with default slots; hardware
+  // identity is not the root widget type.
+  oneof widget {
+    SingleMetricWidget single_metric = 1;
+    DenseMultiMetricWidget dense_multi_metric = 2;
+    StackedMetricWidget stacked_metric = 3;
+    HardwareSummaryWidget hardware_summary = 4;
+  }
+
+  WidgetPreferences preferences = 10;
+}
+
+message SingleMetricWidget {
+  optional MetricSlot slot = 1;
+}
+
+message HardwareSummaryWidget {
+  // Shared source routing for every reading in this summary. V1 summaries are
+  // curated views of one hardware target; per-reading source policies would
+  // turn the widget into Dense under another name.
+  MetricSourcePolicy source_policy = 1;
+
+  // CPU/GPU are the only curated hardware summary targets in v1. Add future
+  // hardware domains as explicit arms instead of accepting arbitrary MetricSlot
+  // rows.
+  oneof target {
+    CpuHardwareSummaryTarget cpu = 10;
+    GpuHardwareSummaryTarget gpu = 11;
+  }
+
+  // Shared appearance for the summary view. Hardware Summary consumes theme,
+  // paint, and widget-owned transparent surface settings. It ignores view and
+  // line settings in v1.
+  AppearanceSettings appearance = 20;
+}
+
+message CpuHardwareSummaryTarget {
+  // Ordered reading slots rendered by the fixed 3-reading summary. The first
+  // item is the primary semicircle gauge; the second and third items are the
+  // secondary readings in display order. Stored reading kinds should be unique;
+  // the resolver repairs duplicates because user selection swaps positions
+  // instead of rejecting normal UI interactions.
+  repeated CpuHardwareSummaryReading ordered_readings = 1 [(buf.validate.field).repeated = {
+    min_items: 3
+    max_items: 3
+  }];
+}
+
+message CpuHardwareSummaryReading {
+  // Reuse the single CPU target reading payloads so temperature/power options
+  // have one schema owner. This wrapper only adds summary ordering.
+  oneof reading {
+    CpuMetricTarget.Usage usage = 1;
+    CpuMetricTarget.Temperature temperature = 2;
+    CpuMetricTarget.Power power = 3;
+  }
+}
+
+message GpuHardwareSummaryTarget {
+  // Ordered reading slots rendered by the fixed 3-reading summary. The first
+  // item is the primary semicircle gauge; the second and third items are the
+  // secondary readings in display order. Stored reading kinds should be unique;
+  // the resolver repairs duplicates because user selection swaps positions
+  // instead of rejecting normal UI interactions.
+  repeated GpuHardwareSummaryReading ordered_readings = 1 [(buf.validate.field).repeated = {
+    min_items: 3
+    max_items: 3
+  }];
+
+  optional string gpu_id = 2 [(buf.validate.field).string.max_len = 1024];
+}
+
+message GpuHardwareSummaryReading {
+  // Reuse the single GPU target reading payloads so temperature/power options
+  // have one schema owner. GPU identity stays on the summary target because all
+  // readings must describe the same physical GPU.
+  oneof reading {
+    GpuMetricTarget.Usage usage = 1;
+    GpuMetricTarget.Temperature temperature = 2;
+    GpuMetricTarget.Vram vram = 3;
+    GpuMetricTarget.Power power = 4;
+  }
+}
+
+message DenseMultiMetricWidget {
+  // Ordered rows rendered by the dense progress-list view.
+  // Valid stored length is 2..6.
+  repeated DenseMetricSlot slots = 1 [(buf.validate.field).repeated = {
+    min_items: 2
+    max_items: 6
+  }];
+
+  // Shared appearance for the dense list. Dense consumes theme, paint, and
+  // widget-owned transparent surface settings. It ignores view and line
+  // settings in v1.
+  AppearanceSettings appearance = 2;
+}
+
+message DenseMetricSlot {
+  // Stable PI/render identity. Generated by Hub and opaque to users.
+  string slot_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 64
+  }];
+
+  optional MetricSlot slot = 2;
+
+  // User-owned row label for the dense list. Absence means use the selected
+  // metric's detected/default short label. The PI should guide users toward
+  // short labels; renderer pixel fitting is the final authority.
+  optional string custom_label = 3 [(buf.validate.field).string.max_len = 16];
+
+  // User-owned row maximum in the metric's raw source unit. Absence means use
+  // the selected metric's semantic/default maximum. This value affects progress
+  // only; it does not change display-unit formatting.
+  optional double custom_maximum_value = 4 [(buf.validate.field).double = {
+    gt: 0
+    lte: 1000000000000000
+  }];
+}
+
+message StackedMetricWidget {
+  // Ordered slots displayed one at a time.
+  // Valid stored length is 2..3.
+  repeated StackedMetricSlot slots = 1 [(buf.validate.field).repeated = {
+    min_items: 2
+    max_items: 3
+  }];
+
+  // Rotation behavior for the stacked widget. Absence means product defaults:
+  // auto-rotate enabled with a 3 second interval.
+  StackedMetricRotationSettings rotation = 2;
+}
+
+message StackedMetricSlot {
+  // Stable PI/runtime identity. Generated by Hub and opaque to users.
+  string slot_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 64
+  }];
+
+  // V1 supports only a complete single-metric widget per stacked slot. Future
+  // nested widget support must add explicit arms here instead of storing a
+  // generic StoredWidgetSettings blob.
+  oneof item {
+    SingleMetricWidget single_metric = 2;
+  }
+}
+
+message StackedMetricRotationSettings {
+  // Absence means enabled.
+  optional bool auto_rotate_enabled = 1;
+
+  // Absence means 3 seconds.
+  optional uint32 interval_seconds = 2 [(buf.validate.field).uint32 = {
+    gte: 1
+    lte: 5
+  }];
+}
+
+// A slot is one metric position inside a widget layout. SingleMetricWidget has
+// one slot; future multi-slot widgets should reuse this concept instead of
+// inventing a separate metric-selection shape.
+message MetricSlot {
+  optional MetricSelection metric = 1;
+
+  // Slot overrides stay with the metric they affect. This keeps future
+  // multi-slot widgets from sharing one ambiguous widget-level appearance,
+  // scale, or channel-color setting across unrelated metrics.
+  optional SlotOverrides overrides = 2;
+}
+
+message MetricSelection {
+  // Source profile choice is optional so existing local metrics can use the
+  // resolver's default source profile. Widgets reference profile IDs here;
+  // MetricSourceProfile.source_type_id names the registry-owned source type.
+  MetricSourcePolicy source_policy = 1;
+
+  // First-class targets are metrics ShoMetrics understands semantically and
+  // can tune precisely for rendering, defaults, labels, units, and presets.
+  //
+  // Catalog targets are for arbitrary readings exposed by a descriptor
+  // producing source, such as a deep hardware monitor, local probe, or remote
+  // machine agent. User-authored HTTP/CLI probes should use their own target
+  // shape instead of being folded into the catalog target.
+  oneof target {
+    CpuMetricTarget cpu = 10;
+    MemoryMetricTarget memory = 11;
+    NetworkMetricTarget network = 12;
+    DiskMetricTarget disk = 13;
+    GpuMetricTarget gpu = 14;
+    SystemMetricTarget system = 15;
+    CatalogMetricTarget catalog = 20;
+    CustomMetricTarget custom = 30;
+  }
+}
+
+message SlotOverrides {
+  AppearanceSettings appearance = 1;
+  NetworkDisplaySettings network = 2;
+  DiskThroughputDisplaySettings disk_throughput = 3;
+}
+
+message MetricSourcePolicy {
+  enum FailureMode {
+    FAILURE_MODE_UNSPECIFIED = 0;
+    FAILURE_MODE_SHOW_UNAVAILABLE = 1;
+    FAILURE_MODE_USE_FALLBACK = 2;
+  }
+
+  optional string primary_source_profile_id = 1 [(buf.validate.field).string.max_len = 128];
+  repeated string fallback_source_profile_ids = 2 [(buf.validate.field).repeated.items.string.max_len = 128];
+  optional FailureMode failure_mode = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+}
+
+message CpuMetricTarget {
+  oneof reading {
+    Usage usage = 1;
+    Temperature temperature = 2;
+    Power power = 3;
+  }
+
+  message Usage {}
+
+  message Temperature {
+    optional uint32 maximum_temperature_celsius = 1 [(buf.validate.field).uint32 = {
+      gte: 1
+      lte: 200
+    }];
+    optional TemperatureUnit temperature_unit = 2 [(buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }];
+  }
+
+  message Power {
+    optional uint32 maximum_power_watts = 1 [(buf.validate.field).uint32 = {
+      gte: 1
+      lte: 2000
+    }];
+  }
+}
+
+message MemoryMetricTarget {
+  oneof reading {
+    Usage usage = 1;
+  }
+
+  message Usage {
+    // Selects which text the key renders. Ring/bar fill, history, and range
+    // colors always track the used share regardless of mode, so absence and
+    // DISPLAY_MODE_USED_PERCENTAGE render identically (pre-display-mode
+    // behavior). There is deliberately no free-percentage mode; do not
+    // complete the matrix.
+    enum DisplayMode {
+      DISPLAY_MODE_UNSPECIFIED = 0;
+      DISPLAY_MODE_USED_PERCENTAGE = 1;
+      DISPLAY_MODE_USED_CAPACITY = 2;
+      // Free means the memory still available to allocate; the metric store's
+      // used reading already excludes reclaimable memory where the platform
+      // reports it.
+      DISPLAY_MODE_FREE_CAPACITY = 3;
+    }
+
+    optional DisplayMode display_mode = 1 [(buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }];
+  }
+}
+
+message NetworkMetricTarget {
+  oneof reading {
+    Traffic traffic = 1;
+    Ping ping = 2;
+  }
+
+  message Traffic {
+    enum Direction {
+      DIRECTION_UNSPECIFIED = 0;
+      DIRECTION_BOTH = 1;
+      DIRECTION_DOWNLOAD = 2;
+      DIRECTION_UPLOAD = 3;
+    }
+
+    enum TrafficDisplayMode {
+      TRAFFIC_DISPLAY_MODE_UNSPECIFIED = 0;
+      TRAFFIC_DISPLAY_MODE_MIRRORED = 1;
+      TRAFFIC_DISPLAY_MODE_OVERLAY = 2;
+    }
+
+    optional Direction direction = 1 [(buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }];
+    optional string interface_id = 2 [(buf.validate.field).string.max_len = 512];
+    optional TrafficDisplayMode traffic_display_mode = 3 [(buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }];
+  }
+
+  message Ping {
+    optional string target_host = 1 [(buf.validate.field).string.max_len = 253];
+    optional uint32 maximum_latency_milliseconds = 2 [(buf.validate.field).uint32.gt = 0];
+  }
+}
+
+message DiskMetricTarget {
+  oneof reading {
+    Usage usage = 1;
+    Throughput throughput = 2;
+  }
+
+  message Usage {
+    // Selects which usage text the key renders. Ring/bar fill, history, and
+    // range colors always track the used share regardless of mode. Existing
+    // enum names and numbers are retained because settings are stored as
+    // ProtoJSON in exported Stream Deck profiles.
+    enum DisplayMode {
+      DISPLAY_MODE_UNSPECIFIED = 0;
+      // Renders the used share as a percentage.
+      DISPLAY_MODE_PERCENTAGE = 1;
+      // Renders available capacity. The legacy SPACE name is retained for
+      // compatibility with stored settings.
+      DISPLAY_MODE_SPACE = 2;
+      // Renders used capacity.
+      DISPLAY_MODE_USED_CAPACITY = 3;
+    }
+
+    optional string volume_id = 1 [(buf.validate.field).string.max_len = 1024];
+    optional DisplayMode display_mode = 2 [(buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }];
+    optional string bar_label = 3 [(buf.validate.field).string.max_len = 32];
+  }
+
+  message Throughput {
+    enum Direction {
+      DIRECTION_UNSPECIFIED = 0;
+      DIRECTION_BOTH = 1;
+      DIRECTION_READ = 2;
+      DIRECTION_WRITE = 3;
+    }
+
+    optional Direction direction = 1 [(buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }];
+  }
+}
+
+message GpuMetricTarget {
+  oneof reading {
+    Usage usage = 1;
+    Temperature temperature = 2;
+    Vram vram = 3;
+    Power power = 4;
+  }
+
+  optional string gpu_id = 10 [(buf.validate.field).string.max_len = 1024];
+
+  message Usage {}
+
+  message Temperature {
+    optional uint32 maximum_temperature_celsius = 1 [(buf.validate.field).uint32 = {
+      gte: 1
+      lte: 200
+    }];
+    optional TemperatureUnit temperature_unit = 2 [(buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }];
+  }
+
+  message Vram {
+    // Mirrors MemoryMetricTarget.Usage.DisplayMode. Display-mode enums stay
+    // per-domain on purpose; do not extract a shared enum.
+    enum DisplayMode {
+      DISPLAY_MODE_UNSPECIFIED = 0;
+      DISPLAY_MODE_USED_PERCENTAGE = 1;
+      DISPLAY_MODE_USED_CAPACITY = 2;
+      DISPLAY_MODE_FREE_CAPACITY = 3;
+    }
+
+    // GpuHardwareSummaryReading reuses this message; the fixed 3-reading
+    // summary ignores display_mode in v1 and always renders the percentage.
+    optional DisplayMode display_mode = 1 [(buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }];
+  }
+
+  message Power {
+    optional uint32 maximum_power_watts = 1 [(buf.validate.field).uint32 = {
+      gte: 1
+      lte: 2000
+    }];
+  }
+}
+
+message MetricIconSettings {
+  optional string id = 1 [(buf.validate.field).string.max_len = 128];
+}
+
+message SystemMetricTarget {
+  // V1 System supports battery percentage only. Add future System readings as
+  // new oneof arms when they are implemented; do not use a kind enum.
+  oneof reading {
+    SystemBatteryMetricTarget battery = 1;
+  }
+}
+
+message SystemBatteryMetricTarget {
+  // Stable user binding captured when the user selected a peripheral System
+  // battery. Absence means the built-in computer battery. When present, the
+  // resolver must treat insufficient or non-unique identity evidence as
+  // peripheral no-data instead of matching an arbitrary device.
+  optional SystemPeripheralIdentity peripheral_identity = 1;
+
+  // Display hint captured at selection time. The resolver may show this for a
+  // stale/offline binding, but runtime discovery owns current display names.
+  optional string detected_peripheral_display_name = 2 [(buf.validate.field).string.max_len = 256];
+
+  // User-owned battery label. Absence means the resolver uses the view-specific
+  // default, such as "BATT" for compact circle/text views or "Battery" for
+  // wider title views. When a peripheral is selected for the first time, Hub may
+  // initialize this from the detected device name; later runtime discovery must
+  // not rewrite it if the device-reported name changes.
+  //
+  // Renderer-facing character limits are intentionally not encoded here. The UI
+  // and renderer own the current per-view fitting policy so changing an 8-char
+  // display cap to 5, 6, or 9 chars does not require a settings-schema change.
+  optional string custom_label = 3 [(buf.validate.field).string.max_len = 128];
+
+  // User-selected icon id owned by ShoMetrics' icon registry. This uses the
+  // same provider-neutral shape as custom metrics so future icon sources can be
+  // added without forking icon settings by metric domain.
+  optional MetricIconSettings custom_icon = 4;
+}
+
+message SystemPeripheralIdentity {
+  oneof evidence {
+    VendorHidIdentity vendor_hid_identity = 14;
+    BluetoothIdentity bluetooth_identity = 15;
+  }
+
+  message VendorHidIdentity {
+    optional uint32 vendor_id = 1 [(buf.validate.field).uint32.lte = 65535];
+    optional uint32 product_id = 2 [(buf.validate.field).uint32.lte = 65535];
+    optional string manufacturer = 3 [(buf.validate.field).string.max_len = 256];
+    optional string product_name = 4 [(buf.validate.field).string.max_len = 256];
+    optional string serial_number = 5 [(buf.validate.field).string.max_len = 1024];
+
+    optional uint32 interface_number = 6 [(buf.validate.field).uint32.lte = 255];
+    optional uint32 usage_page = 7 [(buf.validate.field).uint32.lte = 65535];
+    optional uint32 usage_id = 8 [(buf.validate.field).uint32.lte = 65535];
+
+    // Transport observed when the HID binding was captured. Bluetooth routes
+    // use BluetoothIdentity instead; this field only distinguishes HID route
+    // shapes such as wired, receiver, and vendor-specific wireless paths.
+    optional SystemPeripheralBindingTransport binding_transport = 9 [(buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }];
+    optional SystemPeripheralReceiverKind receiver_kind = 10 [(buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }];
+
+    // Vendor-specific stable unit id from a known read-only protocol feature,
+    // such as Logitech HID++ DeviceInformation. Treat as opaque.
+    optional string vendor_unit_id = 11 [(buf.validate.field).string.max_len = 1024];
+
+    // Stable model or family id owned by the vendor adapter. This is a fallback
+    // signal, not a per-unit identity.
+    optional string model_id = 12 [(buf.validate.field).string.max_len = 256];
+
+    // Route diagnostics and weak matching signal. This must not be treated as
+    // primary cross-transport identity.
+    optional uint32 receiver_slot = 13 [(buf.validate.field).uint32.lte = 255];
+  }
+
+  message BluetoothIdentity {
+    // Primary identity signal used to rebind the selected Bluetooth device to
+    // an exact platform query route. This signal may be less durable than the
+    // fallback signal; for example, a Windows PnP InstanceId can change after
+    // re-pairing or re-enumeration even when the Bluetooth address remains the
+    // same.
+    optional Identifier primary_identifier = 1;
+
+    // Secondary identity signal used only to recover when the primary route no
+    // longer matches. This is best-effort identity recovery, not the normal
+    // query route and not a cross-platform guarantee.
+    optional Identifier fallback_identifier = 2;
+
+    message Identifier {
+      Kind kind = 1 [(buf.validate.field).enum = {
+        defined_only: true
+        not_in: [0]
+      }];
+
+      // Opaque SHA-256 hex hash of the raw identifier. Callers must not parse
+      // this value or assume that hashes from different kinds are comparable.
+      // The pattern intentionally rejects raw MAC addresses, Windows InstanceIds,
+      // and AEP ids.
+      string hash = 2 [(buf.validate.field).string.pattern = "^[0-9a-f]{64}$"];
+
+      enum Kind {
+        KIND_UNSPECIFIED = 0;
+
+        // OS-owned paired-device instance id, such as a Windows PnP InstanceId.
+        KIND_PLATFORM_INSTANCE_ID = 1;
+
+        // Windows Association Endpoint address property. The Windows prefix is
+        // intentional: AEP is a platform-locked identity source.
+        KIND_WINDOWS_AEP_ADDRESS = 2;
+
+        // Bluetooth-based device identity. The hash is usually derived from a
+        // Bluetooth device address exposed by the platform. Some OS sources
+        // expose a stable opaque accessory identifier instead, such as macOS
+        // `pmset` for AirPods battery parts; callers must still treat the hash
+        // as opaque and must not parse it back as a literal address.
+        KIND_BLUETOOTH_DEVICE_ADDRESS = 3;
+      }
+    }
+  }
+}
+
+message CatalogMetricTarget {
+  // Source-scoped normalized metric id produced by a source adapter.
+  //
+  // Treat this as opaque in settings and resolver code. Do not parse path
+  // separators or assume a source-specific shape such as Windows PDH counter
+  // paths, Linux hwmon chip/feature/subfeature names, macOS SMC keys, or
+  // external hardware-monitor sensor paths. Each source adapter owns the
+  // mapping from its native identifiers into this id.
+  optional string metric_id = 1 [(buf.validate.field).string.max_len = 4096];
+
+  // Source-derived display hints captured when the user selected this metric.
+  // These are not user overrides. They keep the widget useful when the source
+  // descriptor catalog is unavailable.
+  optional string detected_label = 2 [(buf.validate.field).string.max_len = 128];
+  optional MetricUnit detected_unit = 3 [(buf.validate.field).enum = {defined_only: true}];
+  optional CatalogMetricCategory detected_category = 4 [(buf.validate.field).enum = {defined_only: true}];
+  optional CatalogMetricReadingKind detected_reading_kind = 5 [(buf.validate.field).enum = {defined_only: true}];
+
+  // User-owned display overrides. Absence means use detected/default behavior.
+  optional string custom_label = 6 [(buf.validate.field).string.max_len = 128];
+  optional double custom_maximum_value = 7 [(buf.validate.field).double = {
+    gt: 0
+    lte: 1000000000000000
+  }];
+
+  // User-selected icon id owned by ShoMetrics' icon registry. Absence means the
+  // renderer uses the metric category or view-specific default icon.
+  optional MetricIconSettings custom_icon = 8;
+}
+
+message CustomMetricTarget {
+  oneof source {
+    CustomHttpMetricSource http = 1;
+  }
+
+  // User-selected icon id owned by ShoMetrics' icon registry. V1 resolves this
+  // through the built-in Lucide registry, but the stored id is intentionally
+  // provider-neutral so future icon sources can extend the schema explicitly.
+  optional MetricIconSettings custom_icon = 2;
+
+  // User-owned label override. Absence means use the Custom HTTP output label
+  // hint, then the resolver-owned Custom HTTP default.
+  optional string custom_label = 3 [(buf.validate.field).string.max_len = 128];
+}
+
+message CustomHttpMetricSource {
+  oneof plan {
+    SingleCustomHttpRequest single_request = 1;
+  }
+}
+
+message SingleCustomHttpRequest {
+  // HTTP GET URL returning JSON. Query strings may be stored because public
+  // no-auth APIs often need them, but logs and runtime metric ids must use only
+  // a sanitized hostname.
+  optional string url = 1 [(buf.validate.field).string.max_len = 2048];
+
+  // User-authored natural-language intent used to regenerate or explain the jq
+  // transform. The runtime does not execute this text and does not require it
+  // after a jq transform has been configured.
+  optional string user_intent = 2 [(buf.validate.field).string.max_len = 2048];
+
+  // jq filter that outputs the V1 Custom Metric single-object schema.
+  optional string jq_transform = 3 [(buf.validate.field).string.max_len = 32768];
+
+  // Per-request fetch policy. Absence means use resolver-owned defaults.
+  optional CustomHttpRequestSettings request_settings = 4;
+
+  // Credential reference and public-HTTP consent for this request. Secrets are
+  // stored in StoredGlobalSettings.custom_http_credentials, never here.
+  optional CustomHttpRequestAuth auth = 5;
+}
+
+message CustomHttpRequestSettings {
+  // Timeout for each HTTP attempt, in whole seconds.
+  optional uint32 timeout_seconds = 1 [(buf.validate.field).uint32 = {
+    gte: 1
+    lte: 30
+  }];
+
+  // Additional retry attempts after the first attempt. For example, 2 means
+  // one original request plus two retries, for three total attempts.
+  optional uint32 retry_count = 2 [(buf.validate.field).uint32 = {lte: 3}];
+}
+
+message CustomHttpRequestAuth {
+  // Opaque id owned by StoredGlobalSettings.custom_http_credentials.
+  optional string credential_id = 1 [(buf.validate.field).string.max_len = 128];
+
+  // Only applies to authenticated public http:// URLs. This is a bool because
+  // the third state is already modeled by context: HTTPS does not need consent,
+  // and localhost/private LAN HTTP is allowed by runtime policy for local
+  // device and LHM use cases. Absence means "not consented" for public HTTP.
+  optional bool allow_public_http_credentials = 2;
+}
+
+enum CatalogMetricCategory {
+  CATALOG_METRIC_CATEGORY_UNSPECIFIED = 0;
+  CATALOG_METRIC_CATEGORY_CPU = 1;
+  CATALOG_METRIC_CATEGORY_GPU = 2;
+  CATALOG_METRIC_CATEGORY_MEMORY = 3;
+  CATALOG_METRIC_CATEGORY_DISK = 4;
+  CATALOG_METRIC_CATEGORY_NETWORK = 5;
+  CATALOG_METRIC_CATEGORY_OTHER = 6;
+}
+
+enum CatalogMetricReadingKind {
+  CATALOG_METRIC_READING_KIND_UNSPECIFIED = 0;
+  CATALOG_METRIC_READING_KIND_USAGE = 1;
+  CATALOG_METRIC_READING_KIND_TEMPERATURE = 2;
+  CATALOG_METRIC_READING_KIND_POWER = 3;
+  CATALOG_METRIC_READING_KIND_CLOCK = 4;
+  CATALOG_METRIC_READING_KIND_FAN = 5;
+  CATALOG_METRIC_READING_KIND_VOLTAGE = 6;
+  CATALOG_METRIC_READING_KIND_CURRENT = 7;
+  CATALOG_METRIC_READING_KIND_DATA = 8;
+  CATALOG_METRIC_READING_KIND_THROUGHPUT = 9;
+  CATALOG_METRIC_READING_KIND_TIMING = 10;
+  CATALOG_METRIC_READING_KIND_LEVEL = 11;
+  CATALOG_METRIC_READING_KIND_CONTROL = 12;
+  CATALOG_METRIC_READING_KIND_OTHER = 13;
+}
+
+// Connection class observed when the user created a peripheral binding.
+// Runtime device paths and current display connection remain source-owned.
+enum SystemPeripheralBindingTransport {
+  SYSTEM_PERIPHERAL_BINDING_TRANSPORT_UNSPECIFIED = 0;
+  SYSTEM_PERIPHERAL_BINDING_TRANSPORT_BLUETOOTH = 1;
+  SYSTEM_PERIPHERAL_BINDING_TRANSPORT_USB_RECEIVER = 2;
+  SYSTEM_PERIPHERAL_BINDING_TRANSPORT_USB_WIRED = 3;
+}
+
+// Receiver family for battery route diagnostics and fallback matching. This is
+// not a per-unit identity; prefer serials or vendor unit ids when available.
+enum SystemPeripheralReceiverKind {
+  SYSTEM_PERIPHERAL_RECEIVER_KIND_UNSPECIFIED = 0;
+  SYSTEM_PERIPHERAL_RECEIVER_KIND_UNKNOWN_RECEIVER = 1;
+  SYSTEM_PERIPHERAL_RECEIVER_KIND_BOLT = 2;
+  SYSTEM_PERIPHERAL_RECEIVER_KIND_UNIFYING = 3;
+  SYSTEM_PERIPHERAL_RECEIVER_KIND_ROG_OMNI = 4;
+  // A known Logitech LIGHTSPEED USB receiver route, not every Logitech
+  // G-series device or direct HID++ device.
+  SYSTEM_PERIPHERAL_RECEIVER_KIND_LIGHTSPEED = 5;
+}
+
+// WidgetPreferences holds behavior shared by the whole widget instance.
+// Metric-specific display parameters belong in their respective *MetricTarget
+// or SlotOverrides message so future multi-slot widgets stay unambiguous.
+message WidgetPreferences {
+  // This field is intentionally broad because safe polling limits depend on
+  // the selected source and metric. The resolver must enforce source-specific
+  // minimums for sources whose polling can conflict with hardware or
+  // manufacturer software.
+  optional uint32 polling_frequency_seconds = 1 [(buf.validate.field).uint32 = {
+    gte: 1
+    lte: 86400
+  }];
+}
+
+message StoredGlobalSettings {
+  optional GlobalDefaults defaults = 1;
+  optional GlobalOverrides overrides = 2;
+
+  // Source profiles are global because many widgets may read from the same
+  // local or remote machine. Widgets store only source profile IDs in
+  // MetricSourcePolicy.
+  repeated MetricSourceProfile source_profiles = 3;
+  optional string default_source_profile_id = 4 [(buf.validate.field).string.max_len = 128];
+
+  // Color compensation is stored globally because it describes Stream Deck
+  // display behavior, not one widget's metric choice. The resolver does not
+  // consume this field until runtime support is intentionally added.
+  optional ColorCompensationSettings color_compensation = 5;
+
+  // User-created Custom HTTP credentials. Widgets store only credential ids;
+  // password and token values must not be copied into action settings.
+  repeated CustomHttpCredential custom_http_credentials = 6;
+
+  // Product-level System behavior. Per-widget System selections stay in
+  // SingleMetricWidget through SystemMetricTarget; runtime-discovered device
+  // lists are never stored here.
+  optional SystemFeatureSettings system = 7;
+}
+
+message SystemFeatureSettings {
+  // Global opt-in for experimental vendor HID battery reads such as USB
+  // receiver, dongle, and wired Logitech/ROG peripherals. Absence means the
+  // resolver uses the product default, currently enabled.
+  optional bool experimental_vendor_hid_battery_enabled = 1;
+}
+
+message CustomHttpCredential {
+  // Sho Metrics generated opaque id. Users may duplicate nicknames and auth
+  // context; widget references use this id to remain stable.
+  optional string id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 128
+  }];
+
+  optional string nickname = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 128
+  }];
+
+  google.protobuf.Timestamp created_at = 3;
+  google.protobuf.Timestamp updated_at = 4;
+
+  oneof auth {
+    Basic basic = 10;
+    Bearer bearer = 11;
+    Header header = 12;
+    Query query = 13;
+  }
+
+  message Basic {
+    optional string username = 1 [(buf.validate.field).string.max_len = 1024];
+
+    // Security-sensitive user credential. Store only in global settings, never
+    // in action settings, prompt text, logs, or runtime metric ids.
+    optional string password = 2 [(buf.validate.field).string.max_len = 8192];
+  }
+
+  message Bearer {
+    // Security-sensitive user credential.
+    optional string token = 1 [(buf.validate.field).string.max_len = 8192];
+  }
+
+  message Header {
+    optional string header_name = 1 [(buf.validate.field).string.max_len = 128];
+
+    // Security-sensitive user credential.
+    optional string token = 2 [(buf.validate.field).string.max_len = 8192];
+  }
+
+  message Query {
+    optional string query_parameter_name = 1 [(buf.validate.field).string.max_len = 128];
+
+    // Security-sensitive user credential.
+    optional string token = 2 [(buf.validate.field).string.max_len = 8192];
+  }
+}
+
+message ColorCompensationSettings {
+  // Profile used when no device-specific target below matches. This is the
+  // current POC behavior: one compensation profile for all Stream Deck output.
+  optional ColorCompensationProfile fallback_profile = 1;
+
+  // Future per-device or per-display-surface overrides. POC writes must leave
+  // this empty, and POC readers must ignore it. Adding target-aware matching
+  // is an intentional resolver change, not a silent behavior shift.
+  //
+  // App-level invariant: targets must be unique by (stream_deck_device_id,
+  // surface_id). The proto cannot enforce this with a map because the key is
+  // composite. Future storage write paths must reject duplicate targets before
+  // saving.
+  repeated TargetColorCompensationProfile target_profiles = 2;
+}
+
+message TargetColorCompensationProfile {
+  ColorCompensationTarget target = 1;
+  ColorCompensationProfile profile = 2;
+}
+
+message ColorCompensationTarget {
+  // Only this id participates in matching. Display hints below are for UI and
+  // diagnostics only.
+  ColorCompensationTargetId id = 1;
+
+  // Human-readable hint captured when the profile is written. This is not
+  // identity and must not be used to match a device.
+  optional string device_display_name = 10 [(buf.validate.field).string.max_len = 128];
+}
+
+message ColorCompensationTargetId {
+  // Opaque Stream Deck SDK device id, available from ActionContext.device.id
+  // or Device.id. Each physical Stream Deck has a unique id regardless of
+  // model, so two Stream Deck XLs can still be distinguished. Do not derive
+  // this from model, display name, size, or action coordinates.
+  optional string stream_deck_device_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 256
+  }];
+
+  // Optional display-surface id inside one device, for future support where
+  // different screens on the same hardware need different compensation, such
+  // as Stream Deck +'s keypad LCDs versus its touch strip.
+  //
+  // Convention when this is set: use the lowercased SDK Controller value,
+  // such as "keypad" or "encoder", for current Stream Deck hardware. New
+  // surface types should agree on a new lowercase tag here before shipping.
+  // Current storage always leaves this unset; POC matching is device-only.
+  optional string surface_id = 2 [(buf.validate.field).string.max_len = 128];
+}
+
+message ColorCompensationProfile {
+  optional int32 brightness_adjustment = 1 [(buf.validate.field).int32 = {
+    gte: -10
+    lte: 10
+  }];
+  optional int32 shadow_adjustment = 2 [(buf.validate.field).int32 = {
+    gte: -10
+    lte: 10
+  }];
+  optional int32 gamma_adjustment = 3 [(buf.validate.field).int32 = {
+    gte: -10
+    lte: 10
+  }];
+  optional int32 saturation_adjustment = 4 [(buf.validate.field).int32 = {
+    gte: -10
+    lte: 10
+  }];
+}
+
+message MetricSourceProfile {
+  optional string id = 1 [(buf.validate.field).string.max_len = 128];
+  optional string display_name = 2 [(buf.validate.field).string.max_len = 128];
+
+  // Source type IDs are registry-owned strings, not enums. This lets the app
+  // add local probes, remote agents, and other descriptor-producing source
+  // adapters without changing persisted settings for every new implementation.
+  optional string source_type_id = 3 [(buf.validate.field).string.max_len = 128];
+
+  oneof connection {
+    HttpMetricSourceConnection http = 10;
+  }
+}
+
+message HttpMetricSourceConnection {
+  // Base URL for a source endpoint, for example a local native probe or a
+  // remote host agent. The resolver/source registry decides whether this field
+  // is required for a given source_type_id.
+  optional string base_url = 1 [(buf.validate.field).string.max_len = 2048];
+
+  // Do not store API tokens, passwords, cookies, or other secrets directly in
+  // Stream Deck settings. Future authenticated connections should store a
+  // credential reference here and keep the secret in the OS credential store.
+}
+
+// Defaults applied when the user creates a new widget.
+message GlobalDefaults {}
+
+message GlobalOverrides {
+  // Main switch for global override. When enabled, omitted subsection enabled
+  // fields resolve to enabled so one click applies view, theme, paint, and
+  // transparent surface overrides.
+  optional bool enabled = 1;
+  GlobalViewOverride view = 2;
+  GlobalThemeOverride theme = 3;
+  GlobalPaintOverride paint = 4;
+  GlobalTransparentSurfaceOverride transparent_surface = 5;
+}
+
+// AppearanceSettings describes the visual presentation of one metric. It is
+// grouped by user-facing domains instead of flattening view, theme, paint, and
+// line settings into one broad message.
+message AppearanceSettings {
+  AppearanceViewSettings view = 1;
+  AppearanceThemeSettings theme = 2;
+  LineAppearanceSettings line = 3;
+
+  // Transparent surface tuning is widget-owned instead of theme-owned. Users
+  // tune it for readability over their background, and changing theme should
+  // not reset that widget-level choice.
+  TransparentSurfaceSettings transparent_surface = 4;
+}
+
+message AppearanceViewSettings {
+  // Main visual form for one metric slot. Composite widgets, such as a touch
+  // strip with two circle views, should be modeled as a future
+  // StoredWidgetSettings widget oneof arm instead of being added here.
+  optional MetricView selected_view = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+
+  // Circle owns its variants here so other view families can add their own
+  // variant fields later without introducing invalid cross-view combinations.
+  optional CircleViewVariant circle_variant = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+
+  // Text owns its variants here so centered metric text and title-card
+  // typography remain view-level choices instead of theme or renderer details.
+  optional TextViewVariant text_variant = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+}
+
+message AppearanceThemeSettings {
+  // Theme is a user-facing visual theme, not a renderer primitive name. New
+  // themes should be enum additions here and mapped to renderer contracts by
+  // the visual adapter.
+  optional MetricTheme selected_theme = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+
+  FlatThemeSettings flat = 2;
+  CupertinoGlassThemeSettings cupertino_glass = 3;
+  ColorFilledThemeSettings color_filled = 4;
+
+  // Terminal owns its variants inside one theme so users can choose between a
+  // clean terminal look and the more opinionated vintage screen treatment
+  // without splitting them into separate themes.
+  TerminalThemeSettings terminal = 5;
+}
+
+message TransparentSurfaceSettings {
+  optional bool enabled = 1;
+  optional uint32 background_opacity_percent = 2 [(buf.validate.field).uint32.lte = 100];
+  optional uint32 text_outline_percent = 3 [(buf.validate.field).uint32.lte = 100];
+  optional uint32 shape_outline_percent = 4 [(buf.validate.field).uint32.lte = 100];
+}
+
+message FlatThemeSettings {
+  // Metric accent paint controls ring, large text, bar fill, and line stroke.
+  MetricPaintSettings paint = 1;
+}
+
+message CupertinoGlassThemeSettings {
+  // Metric accent paint controls foreground metric emphasis for now. Future
+  // glass tint or glass material settings belong in this message, not in Flat.
+  MetricPaintSettings paint = 1;
+}
+
+message ColorFilledThemeSettings {
+  // Color Filled paint controls the widget background fill. Foreground paint is
+  // derived by the renderer for legibility.
+  ColorFilledPaintSettings paint = 1;
+}
+
+message TerminalThemeSettings {
+  optional TerminalThemeVariant variant = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+
+  // Terminal paint is theme-owned because terminal palettes control the whole
+  // foreground treatment, including text, dim text, and glow.
+  TerminalPaintSettings paint = 2;
+}
+
+message TerminalPaintSettings {
+  // Selected phosphor palette for Terminal. The resolver owns concrete RGB
+  // values so stored settings keep product-level intent.
+  optional TerminalPalettePreset preset = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+}
+
+message MetricPaintSettings {
+  // User-facing metric color treatment. Multi-color means value-driven metric
+  // color bands for ordinary metric graphics; B&W is a final paint constraint
+  // applied by the visual adapter.
+  optional ColorMode color_mode = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+
+  MetricSolidPaintSettings solid = 2;
+  MetricMultiColorPaintSettings multi_color = 3;
+}
+
+message MetricSolidPaintSettings {
+  MetricSolidChannelColors colors = 1;
+
+  // When unset, the resolver enables smooth gradients for solid metric paint.
+  optional bool gradient_enabled = 2;
+}
+
+message MetricSolidChannelColors {
+  // Channel colors are named fields while the channel set is fixed. If
+  // channels become user-defined, replace them with a repeated message keyed
+  // by stable channel IDs.
+  optional string usage_color = 1 [(buf.validate.field).string.pattern = "^#[0-9a-fA-F]{6}$"];
+  optional string download_color = 2 [(buf.validate.field).string.pattern = "^#[0-9a-fA-F]{6}$"];
+  optional string upload_color = 3 [(buf.validate.field).string.pattern = "^#[0-9a-fA-F]{6}$"];
+  optional string disk_read_color = 4 [(buf.validate.field).string.pattern = "^#[0-9a-fA-F]{6}$"];
+  optional string disk_write_color = 5 [(buf.validate.field).string.pattern = "^#[0-9a-fA-F]{6}$"];
+}
+
+message MetricMultiColorPaintSettings {
+  option (buf.validate.message).cel = {
+    id: "multi_color_threshold_order"
+    message: "low_threshold_percent must be less than or equal to high_threshold_percent"
+    expression:
+      "!has(this.low_threshold_percent) || !has(this.high_threshold_percent) || "
+      "this.low_threshold_percent <= this.high_threshold_percent"
+  };
+
+  MetricMultiColorChannelColors colors = 1;
+
+  // Color thresholds are normalized percentage stops for multi-color band selection,
+  // not alert rules and not raw metric values such as Celsius, watts, or ms.
+  optional uint32 low_threshold_percent = 2 [(buf.validate.field).uint32.lte = 100];
+  optional uint32 high_threshold_percent = 3 [(buf.validate.field).uint32.lte = 100];
+
+  // When unset, the resolver enables smooth gradients for multi-color metric
+  // paint.
+  optional bool gradient_enabled = 4;
+}
+
+message MetricMultiColorChannelColors {
+  MultiColorSet usage = 1;
+  MultiColorSet download = 2;
+  MultiColorSet upload = 3;
+  MultiColorSet disk_read = 4;
+  MultiColorSet disk_write = 5;
+}
+
+message MultiColorSet {
+  optional string low_color = 1 [(buf.validate.field).string.pattern = "^#[0-9a-fA-F]{6}$"];
+  optional string medium_color = 2 [(buf.validate.field).string.pattern = "^#[0-9a-fA-F]{6}$"];
+  optional string high_color = 3 [(buf.validate.field).string.pattern = "^#[0-9a-fA-F]{6}$"];
+}
+
+message ColorFilledPaintSettings {
+  // In Color Filled, solid and multi-color choose the widget background fill
+  // branch instead of ordinary metric paint.
+  optional ColorMode color_mode = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+
+  ColorFilledSolidPaintSettings solid = 2;
+  ColorFilledMultiColorPaintSettings multi_color = 3;
+}
+
+message ColorFilledSolidPaintSettings {
+  optional string color = 1 [(buf.validate.field).string.pattern = "^#[0-9a-fA-F]{6}$"];
+
+  // When unset, the resolver enables smooth gradients for the filled
+  // background.
+  optional bool gradient_enabled = 2;
+}
+
+message ColorFilledMultiColorPaintSettings {
+  MultiColorSet colors = 1;
+
+  // When unset, the resolver enables smooth gradients for the filled
+  // background.
+  optional bool gradient_enabled = 2;
+}
+
+message LineAppearanceSettings {
+  enum GridLineVisibility {
+    GRID_LINE_VISIBILITY_UNSPECIFIED = 0;
+    GRID_LINE_VISIBILITY_ADAPTIVE = 1;
+    GRID_LINE_VISIBILITY_ALWAYS = 2;
+    GRID_LINE_VISIBILITY_NONE = 3;
+  }
+
+  enum GridLineType {
+    GRID_LINE_TYPE_UNSPECIFIED = 0;
+    GRID_LINE_TYPE_HORIZONTAL = 1;
+    GRID_LINE_TYPE_VERTICAL = 2;
+  }
+
+  optional uint32 line_smoothing_percent = 1 [(buf.validate.field).uint32.lte = 100];
+  optional GridLineVisibility grid_line_visibility = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  optional GridLineType grid_line_type = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+}
+
+message GlobalViewOverride {
+  // When unset and global override is enabled, the resolver treats this
+  // subsection as enabled.
+  optional bool enabled = 1;
+  AppearanceViewSettings view = 2;
+}
+
+message GlobalThemeOverride {
+  // When unset and global override is enabled, the resolver treats this
+  // subsection as enabled.
+  optional bool enabled = 1;
+  AppearanceThemeSettings theme = 2;
+}
+
+message GlobalTransparentSurfaceOverride {
+  // When unset and global override is enabled, the resolver treats this
+  // subsection as enabled.
+  optional bool enabled = 1;
+
+  // Global override also stores one transparent surface setting because this
+  // axis expresses readability over the user's background, not theme identity.
+  TransparentSurfaceSettings transparent_surface = 2;
+}
+
+message GlobalPaintOverride {
+  // When unset and global override is enabled, the resolver treats this
+  // subsection as enabled.
+  //
+  // This is intentionally one global paint override switch. It is not stored
+  // per theme: when enabled, the resolver applies the active branch below based
+  // on each widget's effective theme.
+  optional bool enabled = 1;
+
+  // Used when the effective theme is Flat or Cupertino Glass.
+  GlobalMetricPaintSettings metric = 2;
+
+  // Used when the effective theme is Color Filled.
+  ColorFilledPaintSettings color_filled = 3;
+
+  // Used when the effective theme is Terminal.
+  TerminalPaintSettings terminal = 4;
+}
+
+message GlobalMetricPaintSettings {
+  // Global metric paint intentionally uses one solid color and one multi-color
+  // set for every metric channel. Widget-level metric paint remains
+  // per-channel for fine-grained tuning.
+  optional ColorMode color_mode = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+
+  GlobalSolidPaintSettings solid = 2;
+  GlobalMultiColorPaintSettings multi_color = 3;
+}
+
+message GlobalSolidPaintSettings {
+  optional string color = 1 [(buf.validate.field).string.pattern = "^#[0-9a-fA-F]{6}$"];
+
+  // When unset, the resolver enables smooth gradients for solid metric paint.
+  optional bool gradient_enabled = 2;
+}
+
+message GlobalMultiColorPaintSettings {
+  option (buf.validate.message).cel = {
+    id: "global_multi_color_threshold_order"
+    message: "low_threshold_percent must be less than or equal to high_threshold_percent"
+    expression:
+      "!has(this.low_threshold_percent) || !has(this.high_threshold_percent) || "
+      "this.low_threshold_percent <= this.high_threshold_percent"
+  };
+
+  MultiColorSet colors = 1;
+
+  // Color thresholds are normalized percentage stops for multi-color band selection,
+  // not alert rules and not raw metric values such as Celsius, watts, or ms.
+  optional uint32 low_threshold_percent = 2 [(buf.validate.field).uint32.lte = 100];
+  optional uint32 high_threshold_percent = 3 [(buf.validate.field).uint32.lte = 100];
+
+  // When unset, the resolver enables smooth gradients for multi-color metric
+  // paint.
+  optional bool gradient_enabled = 4;
+}
+
+message NetworkDisplaySettings {
+  enum UnitBase {
+    UNIT_BASE_UNSPECIFIED = 0;
+    UNIT_BASE_BYTE = 1;
+    UNIT_BASE_BIT = 2;
+  }
+
+  optional ScaleMode scale_mode = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  optional uint32 maximum_download_speed_megabits_per_second = 2 [(buf.validate.field).uint32.gt = 0];
+  optional uint32 maximum_upload_speed_megabits_per_second = 3 [(buf.validate.field).uint32.gt = 0];
+  optional UnitBase unit_base = 4 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+}
+
+message DiskThroughputDisplaySettings {
+  optional ScaleMode scale_mode = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  optional uint32 maximum_read_throughput_mebibytes_per_second = 2 [(buf.validate.field).uint32.gt = 0];
+  optional uint32 maximum_write_throughput_mebibytes_per_second = 3 [(buf.validate.field).uint32.gt = 0];
+}
+
+enum MetricView {
+  METRIC_VIEW_UNSPECIFIED = 0;
+  METRIC_VIEW_TEXT = 1;
+  METRIC_VIEW_LINE = 2;
+  METRIC_VIEW_BAR = 3;
+  METRIC_VIEW_CIRCLE = 4;
+}
+
+enum CircleViewVariant {
+  CIRCLE_VIEW_VARIANT_UNSPECIFIED = 0;
+  CIRCLE_VIEW_VARIANT_FULL_RING = 1;
+  CIRCLE_VIEW_VARIANT_MINIMAL = 2;
+  CIRCLE_VIEW_VARIANT_GAUGE = 3;
+}
+
+enum TextViewVariant {
+  TEXT_VIEW_VARIANT_UNSPECIFIED = 0;
+  TEXT_VIEW_VARIANT_CENTERED = 1;
+  TEXT_VIEW_VARIANT_TITLE_CARD = 2;
+}
+
+enum MetricTheme {
+  METRIC_THEME_UNSPECIFIED = 0;
+  METRIC_THEME_FLAT = 1;
+  METRIC_THEME_CUPERTINO_GLASS = 2;
+  METRIC_THEME_COLOR_FILLED = 3;
+  METRIC_THEME_TERMINAL = 4;
+  METRIC_THEME_PIXEL_WINDOW = 5;
+}
+
+enum TerminalThemeVariant {
+  TERMINAL_THEME_VARIANT_UNSPECIFIED = 0;
+  TERMINAL_THEME_VARIANT_CLEAN = 1;
+  TERMINAL_THEME_VARIANT_VINTAGE = 2;
+}
+
+enum TerminalPalettePreset {
+  TERMINAL_PALETTE_PRESET_UNSPECIFIED = 0;
+  TERMINAL_PALETTE_PRESET_GREEN = 1;
+  TERMINAL_PALETTE_PRESET_AMBER = 2;
+  TERMINAL_PALETTE_PRESET_CYAN = 3;
+  TERMINAL_PALETTE_PRESET_WHITE = 4;
+}
+
+enum ColorMode {
+  COLOR_MODE_UNSPECIFIED = 0;
+  COLOR_MODE_MULTI_COLOR = 1;
+  COLOR_MODE_SOLID = 2;
+  COLOR_MODE_BLACK_WHITE = 3;
+}
+
+enum ScaleMode {
+  SCALE_MODE_UNSPECIFIED = 0;
+  SCALE_MODE_AUTO = 1;
+  SCALE_MODE_CUSTOM = 2;
+}
+
+enum TemperatureUnit {
+  TEMPERATURE_UNIT_UNSPECIFIED = 0;
+  TEMPERATURE_UNIT_CELSIUS = 1;
+  TEMPERATURE_UNIT_FAHRENHEIT = 2;
+}

@@ -1,0 +1,203 @@
+syntax = "proto3";
+
+package shometrics.v1;
+
+import "shometrics/v1/metric_common.proto";
+
+option csharp_namespace = "ShoMetrics.Contracts.V1";
+
+// gRPC protocol for ShoMetrics-owned out-of-process metric helpers.
+//
+// A helper may run on the local machine or on a remote machine. The boundary is
+// not locality; it is an independently versioned ShoMetrics-owned process that
+// speaks this gRPC protocol. In-process Node sources and Custom HTTP sources use
+// metric_common.proto but must not depend on this helper transport contract.
+//
+// The production Windows transport is gRPC over a Windows named pipe. Keep this
+// API narrow and read-only; privileged helper control belongs in a separate
+// authorization design.
+//
+// Windows helper and Hub implementations currently cap send/receive messages
+// at 1 MiB.
+service MetricSourceService {
+  rpc GetSourceHealth(GetSourceHealthRequest) returns (GetSourceHealthResponse);
+  rpc ListMetricDescriptors(ListMetricDescriptorsRequest) returns (ListMetricDescriptorsResponse);
+  rpc ReadMetricSnapshot(ReadMetricSnapshotRequest) returns (ReadMetricSnapshotResponse);
+  rpc SetMetricRefreshDemand(SetMetricRefreshDemandRequest) returns (SetMetricRefreshDemandResponse);
+}
+
+message GetSourceHealthRequest {}
+
+message GetSourceHealthResponse {
+  string source_id = 1;
+  string protocol_version = 2;
+  string helper_version = 3;
+  repeated SourceWarning warnings = 4;
+  repeated SourceComponentStatus component_statuses = 5;
+}
+
+message ListMetricDescriptorsRequest {
+  repeated string metric_ids = 1;
+}
+
+message ListMetricDescriptorsResponse {
+  HelperMetricDescriptorSnapshot descriptor_snapshot = 1;
+  repeated SourceWarning warnings = 2;
+}
+
+message ReadMetricSnapshotRequest {
+  repeated string metric_ids = 1;
+  bool include_descriptors = 2;
+}
+
+message ReadMetricSnapshotResponse {
+  MetricSnapshot snapshot = 1;
+  HelperMetricDescriptorSnapshot descriptor_snapshot = 2;
+  repeated SourceWarning warnings = 3;
+
+  // Optional helper-specific provenance for values emitted in snapshot.metrics.
+  // Missing provenance must not make a metric value invalid.
+  repeated HelperMetricValueProvenance value_provenance = 4;
+
+  // Helper-reported reasons for requested metrics omitted from snapshot.metrics.
+  repeated HelperMetricUnavailableReport unavailable_metrics = 5;
+}
+
+// Full replacement for the helper refresh demand computed by the Hub.
+//
+// The helper validates all counts, lengths, and intervals before mutating its
+// demand state. Hub must treat polling_group_id as opaque source-owned data.
+message SetMetricRefreshDemandRequest {
+  repeated MetricRefreshDemandGroup groups = 1;
+}
+
+message MetricRefreshDemandGroup {
+  // Source-owned descriptor polling group id returned by MetricDescriptor.
+  // Hub must not parse this value.
+  string polling_group_id = 1;
+
+  // ShoMetrics metric ids that caused this group to be demanded. The helper
+  // uses these only for validation and diagnostics; polling_group_id still owns
+  // the hardware refresh mapping.
+  repeated string metric_ids = 2;
+
+  // Hub-requested cadence. Helper clamps this to its own safe min/max range.
+  uint32 requested_interval_milliseconds = 3;
+}
+
+message SetMetricRefreshDemandResponse {
+  uint32 accepted_group_count = 1;
+  uint32 ignored_group_count = 2;
+  uint32 effective_minimum_interval_milliseconds = 3;
+  uint32 demand_ttl_milliseconds = 4;
+  repeated SourceWarning warnings = 5;
+}
+
+message HelperMetricDescriptorSnapshot {
+  // Descriptors matching the request filter. Empty filters return all known
+  // descriptors.
+  repeated HelperMetricDescriptor descriptors = 1;
+
+  // Opaque helper-owned identity for the complete planning descriptor catalog.
+  //
+  // It covers the full catalog even when `descriptors` is filtered. Consumers
+  // compare it for equality only; do not parse it or infer helper health from it.
+  string descriptor_fingerprint = 2;
+}
+
+message HelperMetricDescriptor {
+  MetricDescriptor descriptor = 1;
+
+  // Helper/raw-sensor provenance for descriptor selection and diagnostics.
+  // Generic metric rendering must not require this field.
+  RawSensorIdentity raw_sensor_identity = 2;
+}
+
+message HelperMetricValueProvenance {
+  // ShoMetrics metric id. Must match a key in MetricSnapshot.metrics for the
+  // same response.
+  string metric_id = 1;
+
+  // Helper/raw-sensor provenance for support and DEBUG views. Generic metric
+  // rendering must not require this field.
+  RawSensorIdentity raw_sensor_identity = 2;
+}
+
+message HelperMetricUnavailableReport {
+  MetricUnavailableReport report = 1;
+
+  // Set when the helper selected or retained a raw sensor but omitted the value
+  // because that sensor's current value was invalid or expired. Omitted when no
+  // matching source sensor exists.
+  RawSensorIdentity raw_sensor_identity = 2;
+}
+
+message SourceWarning {
+  string code = 1;
+  string message = 2;
+  optional string metric_id = 3;
+  optional string source_sensor_id = 4;
+}
+
+message SourceComponentStatus {
+  // Known component id such as "driver:pawnio". Consumers may branch on known
+  // complete ids, not arbitrary substrings.
+  string component = 1;
+
+  // Current component state as determined by the producer that owns the
+  // component id.
+  SourceComponentState state = 2;
+
+  // Component-owned version when available, such as the PawnIO module version.
+  // This is separate from GetSourceHealthResponse.helper_version.
+  optional string version = 3;
+}
+
+message SourceError {
+  string code = 1;
+  string message = 2;
+}
+
+message RawSensorIdentity {
+  // Helper-owned opaque sensor id. Hub must not parse this value.
+  string source_sensor_id = 1;
+
+  // Helper-owned opaque hardware id. Hub must not parse this value.
+  string hardware_id = 2;
+
+  string hardware_name = 3;
+
+  // Helper-owned raw hardware type label. Generic Hub runtime must not parse it.
+  string hardware_type = 4;
+
+  string sensor_name = 5;
+
+  // Helper-owned raw sensor type label. Generic Hub runtime must not parse it.
+  string source_sensor_type = 6;
+}
+
+enum SourceComponentState {
+  // Proto default. Producers must not emit this intentionally; consumers should
+  // display it like UNKNOWN and may log it as malformed producer data.
+  SOURCE_COMPONENT_STATE_UNSPECIFIED = 0;
+
+  // The producer intentionally cannot determine this component's state.
+  SOURCE_COMPONENT_STATE_UNKNOWN = 1;
+
+  // The component is present and usable for the helper's current privileges.
+  SOURCE_COMPONENT_STATE_OK = 2;
+
+  // The component is not installed or not discoverable by the helper.
+  SOURCE_COMPONENT_STATE_NOT_INSTALLED = 3;
+
+  // The component is present, but the helper lacks required privileges.
+  SOURCE_COMPONENT_STATE_NOT_ELEVATED = 4;
+
+  // The component is present, but health checks indicate unusable output.
+  SOURCE_COMPONENT_STATE_UNUSABLE = 5;
+
+  // The component cannot be supported on this platform, for example a ring0
+  // driver on a non-x86 CPU architecture. This is an informational terminal
+  // state, not an error the user can fix.
+  SOURCE_COMPONENT_STATE_NOT_SUPPORTED = 6;
+}

@@ -1,0 +1,9 @@
+[Unit]
+Description=Sho Metrics Linux hwmon helper (gRPC over unix socket)
+
+[Service]
+ExecStart=/usr/bin/node %h/shometrics-linux-helper/server.mjs
+Restart=on-failure
+
+[Install]
+WantedBy=default.target

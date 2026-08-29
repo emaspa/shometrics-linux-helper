@@ -1,0 +1,362 @@
+#!/usr/bin/env node
+// shometrics-linux-helper: serves Linux hardware sensors to the Sho Metrics
+// Stream Deck plugin over its MetricSourceService gRPC contract.
+//
+// Sources:
+//   - /sys/class/hwmon (temperatures, fans, voltages, currents, power, energy)
+//   - lactd (NVIDIA GPU: hotspot, VRAM junction + per-chip temps, fan, power,
+//     clocks, VRAM usage, utilization) when /run/lactd.sock is available
+import grpc from "@grpc/grpc-js";
+import protoLoader from "@grpc/proto-loader";
+import { readdirSync, readFileSync, readlinkSync, mkdirSync, rmSync, existsSync } from "node:fs";
+import { basename, join } from "node:path";
+import { connect } from "node:net";
+
+const HWMON_ROOT = "/sys/class/hwmon";
+const LACT_SOCKET = "/run/lactd.sock";
+const SOCKET_DIR = "/tmp/shometrics-helper";
+const SOCKET_PATH = join(SOCKET_DIR, "ShoMetrics.Source.Windows.Grpc.v1");
+const PROTOCOL_VERSION = "1";
+const HELPER_VERSION = "0.2.0";
+const ENUMERATE_INTERVAL_MS = 60000;
+const LACT_STATS_CACHE_MS = 900;
+
+const UNIT = {
+    PERCENT: 1, CELSIUS: 2, VOLTS: 3, AMPERES: 4, WATTS: 5,
+    HERTZ: 6, BYTES: 7, RPM: 9, WATT_HOURS: 13,
+};
+
+// ---------------------------------------------------------------- hwmon source
+
+// sensor file prefix -> [unit, divisor to canonical unit]
+const HWMON_TYPES = {
+    temp:     { unit: UNIT.CELSIUS,    divisor: 1000,  label: "Temperature" },
+    fan:      { unit: UNIT.RPM,        divisor: 1,     label: "Fan" },
+    in:       { unit: UNIT.VOLTS,      divisor: 1000,  label: "Voltage" },
+    curr:     { unit: UNIT.AMPERES,    divisor: 1000,  label: "Current" },
+    power:    { unit: UNIT.WATTS,      divisor: 1e6,   label: "Power" },
+    energy:   { unit: UNIT.WATT_HOURS, divisor: 3.6e9, label: "Energy" },
+    humidity: { unit: UNIT.PERCENT,    divisor: 1000,  label: "Humidity" },
+};
+
+function readTrimmed(path) {
+    return readFileSync(path, "utf8").trim();
+}
+
+// Stable id for a chip across reboots: driver name + device path basename
+// (hwmonN numbering is not stable).
+function chipDeviceId(hwmonPath) {
+    try {
+        return basename(readlinkSync(join(hwmonPath, "device")));
+    } catch {
+        return "virtual";
+    }
+}
+
+function enumerateHwmonSensors(sensors) {
+    let entries = [];
+    try {
+        entries = readdirSync(HWMON_ROOT);
+    } catch {
+        return;
+    }
+    for (const hw of entries) {
+        const hwPath = join(HWMON_ROOT, hw);
+        let chip;
+        try {
+            chip = readTrimmed(join(hwPath, "name"));
+        } catch {
+            continue;
+        }
+        const devId = chipDeviceId(hwPath);
+        const hardwareId = `${chip}@${devId}`;
+        let files;
+        try {
+            files = readdirSync(hwPath);
+        } catch {
+            continue;
+        }
+        for (const file of files) {
+            const m = file.match(/^(temp|fan|in|curr|power|energy|humidity)(\d+)_input$/);
+            if (!m) continue;
+            const [, kind, index] = m;
+            const type = HWMON_TYPES[kind];
+            const inputPath = join(hwPath, file);
+            let label = `${type.label} ${index}`;
+            try {
+                label = readTrimmed(join(hwPath, `${kind}${index}_label`));
+            } catch { /* no label file; keep generic */ }
+            const metricId = `linux-hwmon.${hardwareId}.${kind}${index}`;
+            sensors.set(metricId, {
+                metricId,
+                unit: type.unit,
+                hardwareId,
+                hardwareName: chip,
+                hardwareType: "hwmon",
+                sensorName: label,
+                sensorType: kind,
+                pollingGroupId: hardwareId,
+                read: async () => {
+                    const raw = parseInt(readTrimmed(inputPath), 10);
+                    if (Number.isNaN(raw)) throw new Error("NaN");
+                    return raw / type.divisor;
+                },
+            });
+        }
+    }
+}
+
+// ----------------------------------------------------------------- LACT source
+
+function lactRequest(command, args) {
+    return new Promise((resolve, reject) => {
+        const socket = connect(LACT_SOCKET);
+        let buffer = "";
+        socket.setTimeout(2000, () => { socket.destroy(); reject(new Error("lact timeout")); });
+        socket.on("error", reject);
+        socket.on("connect", () => {
+            socket.write(JSON.stringify(args === undefined ? { command } : { command, args }) + "\n");
+        });
+        socket.on("data", chunk => {
+            buffer += chunk;
+            const newline = buffer.indexOf("\n");
+            if (newline === -1 && !buffer.trim().endsWith("}")) return;
+            socket.destroy();
+            try {
+                const response = JSON.parse(buffer);
+                if (response.status !== "ok") return reject(new Error(`lact: ${response.data}`));
+                resolve(response.data);
+            } catch (e) {
+                reject(e);
+            }
+        });
+    });
+}
+
+const lactStatsCache = new Map(); // device id -> { at, promise }
+
+function lactStats(deviceId) {
+    const cached = lactStatsCache.get(deviceId);
+    if (cached && Date.now() - cached.at < LACT_STATS_CACHE_MS) return cached.promise;
+    const promise = lactRequest("device_stats", { id: deviceId });
+    lactStatsCache.set(deviceId, { at: Date.now(), promise });
+    promise.catch(() => lactStatsCache.delete(deviceId));
+    return promise;
+}
+
+function slug(name) {
+    return name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+}
+
+async function enumerateLactSensors(sensors) {
+    if (!existsSync(LACT_SOCKET)) return;
+    const devices = await lactRequest("list_devices");
+    for (const device of devices) {
+        if (!device.id.startsWith("10DE:")) continue; // NVIDIA only; hwmon covers AMD
+        const stats = await lactStats(device.id);
+        const hardwareId = `nvidia@${device.id}`;
+        const base = {
+            hardwareId,
+            hardwareName: device.name,
+            hardwareType: "gpu-nvidia",
+            pollingGroupId: hardwareId,
+        };
+        const add = (key, sensorName, sensorType, unit, extract) => {
+            const metricId = `linux-nvidia.${device.id}.${key}`;
+            sensors.set(metricId, {
+                ...base, metricId, unit, sensorName, sensorType,
+                read: async () => {
+                    const value = extract(await lactStats(device.id));
+                    if (value === undefined || value === null || Number.isNaN(value)) {
+                        throw new Error("missing");
+                    }
+                    return value;
+                },
+            });
+        };
+        for (const tempName of Object.keys(stats.temps ?? {})) {
+            add(`temp.${slug(tempName)}`, tempName, "temp", UNIT.CELSIUS,
+                s => s.temps?.[tempName]?.current);
+        }
+        add("fan_rpm", "Fan", "fan", UNIT.RPM, s => s.fan?.speed_current);
+        add("fan_pwm", "Fan PWM", "control", UNIT.PERCENT,
+            s => s.fan?.pwm_current === undefined ? undefined : s.fan.pwm_current / 255 * 100);
+        add("power_draw", "Power Draw", "power", UNIT.WATTS, s => s.power?.current);
+        add("power_cap", "Power Limit", "power", UNIT.WATTS, s => s.power?.cap_current);
+        add("clock_gpu", "GPU Clock", "clock", UNIT.HERTZ,
+            s => s.clockspeed?.gpu_clockspeed === undefined ? undefined : s.clockspeed.gpu_clockspeed * 1e6);
+        add("clock_vram", "VRAM Clock", "clock", UNIT.HERTZ,
+            s => s.clockspeed?.vram_clockspeed === undefined ? undefined : s.clockspeed.vram_clockspeed * 1e6);
+        add("vram_used", "VRAM Used", "data", UNIT.BYTES, s => s.vram?.used);
+        add("vram_total", "VRAM Total", "data", UNIT.BYTES, s => s.vram?.total);
+        add("busy", "GPU Usage", "load", UNIT.PERCENT, s => s.busy_percent);
+    }
+}
+
+// ------------------------------------------------------------------- catalog
+
+let sensors = new Map();
+let lastEnumeratedAt = 0;
+let enumerating = null;
+
+async function refreshedSensors() {
+    if (Date.now() - lastEnumeratedAt < ENUMERATE_INTERVAL_MS) return sensors;
+    enumerating ??= (async () => {
+        const next = new Map();
+        enumerateHwmonSensors(next);
+        try {
+            await enumerateLactSensors(next);
+        } catch (e) {
+            console.error("lact enumeration failed:", e.message);
+        }
+        sensors = next;
+        lastEnumeratedAt = Date.now();
+        enumerating = null;
+    })();
+    await enumerating;
+    return sensors;
+}
+
+function descriptorFor(sensor) {
+    return {
+        descriptor: {
+            metric_id: sensor.metricId,
+            value_kind: 1, // SCALAR
+            unit: sensor.unit,
+            metric_id_kind: 2, // SOURCE_NATIVE
+            polling_group_id: sensor.pollingGroupId,
+        },
+        raw_sensor_identity: {
+            source_sensor_id: sensor.metricId,
+            hardware_id: sensor.hardwareId,
+            hardware_name: sensor.hardwareName,
+            hardware_type: sensor.hardwareType,
+            sensor_name: sensor.sensorName,
+            source_sensor_type: sensor.sensorType,
+        },
+    };
+}
+
+function fingerprint(all) {
+    return `linux:${all.size}:${[...all.keys()].sort().join("|").length}`;
+}
+
+function nowTimestamp() {
+    const ms = Date.now();
+    return { seconds: Math.floor(ms / 1000), nanos: (ms % 1000) * 1e6 };
+}
+
+// -------------------------------------------------------------------- server
+
+const handlers = {
+    GetSourceHealth(_call, callback) {
+        callback(null, {
+            source_id: "linux-hwmon-helper",
+            protocol_version: PROTOCOL_VERSION,
+            helper_version: HELPER_VERSION,
+            warnings: [],
+            component_statuses: [
+                { component: "sysfs:hwmon", state: 2 /* OK */ },
+                { component: "daemon:lactd", state: existsSync(LACT_SOCKET) ? 2 : 3 /* NOT_INSTALLED */ },
+            ],
+        });
+    },
+
+    ListMetricDescriptors(call, callback) {
+        refreshedSensors().then(all => {
+            const filter = call.request.metric_ids ?? [];
+            const selected = filter.length > 0
+                ? filter.map(id => all.get(id)).filter(Boolean)
+                : [...all.values()];
+            callback(null, {
+                descriptor_snapshot: {
+                    descriptors: selected.map(descriptorFor),
+                    descriptor_fingerprint: fingerprint(all),
+                },
+                warnings: [],
+            });
+        }).catch(e => callback(e));
+    },
+
+    ReadMetricSnapshot(call, callback) {
+        refreshedSensors().then(async all => {
+            const requested = (call.request.metric_ids?.length ?? 0) > 0
+                ? call.request.metric_ids
+                : [...all.keys()];
+            const metrics = {};
+            const provenance = [];
+            const unavailable = [];
+            await Promise.all(requested.map(async id => {
+                const sensor = all.get(id);
+                if (!sensor) {
+                    unavailable.push({ report: { metric_id: id, reason: 1 /* NO_SOURCE_READING */ } });
+                    return;
+                }
+                try {
+                    const value = await sensor.read();
+                    metrics[id] = {
+                        scalar: value,
+                        unit: sensor.unit,
+                        metadata: { freshness: 1 /* FRESH */ },
+                    };
+                    provenance.push({
+                        metric_id: id,
+                        raw_sensor_identity: descriptorFor(sensor).raw_sensor_identity,
+                    });
+                } catch {
+                    unavailable.push({
+                        report: { metric_id: id, reason: 2 /* INVALID_VALUE */ },
+                        raw_sensor_identity: descriptorFor(sensor).raw_sensor_identity,
+                    });
+                }
+            }));
+            const response = {
+                snapshot: { captured_at: nowTimestamp(), metrics },
+                warnings: [],
+                value_provenance: provenance,
+                unavailable_metrics: unavailable,
+            };
+            if (call.request.include_descriptors) {
+                response.descriptor_snapshot = {
+                    descriptors: [...all.values()].map(descriptorFor),
+                    descriptor_fingerprint: fingerprint(all),
+                };
+            }
+            callback(null, response);
+        }).catch(e => callback(e));
+    },
+
+    SetMetricRefreshDemand(call, callback) {
+        // reads are cheap and done on demand; accept everything
+        callback(null, {
+            accepted_group_count: call.request.groups?.length ?? 0,
+            ignored_group_count: 0,
+            effective_minimum_interval_milliseconds: 500,
+            demand_ttl_milliseconds: 60000,
+            warnings: [],
+        });
+    },
+};
+
+const packageDefinition = protoLoader.loadSync(
+    "shometrics/v1/helper_grpc_service.proto",
+    { includeDirs: [join(import.meta.dirname, "proto")], keepCase: true, defaults: true },
+);
+const proto = grpc.loadPackageDefinition(packageDefinition);
+
+mkdirSync(SOCKET_DIR, { recursive: true, mode: 0o700 });
+if (existsSync(SOCKET_PATH)) rmSync(SOCKET_PATH);
+
+const server = new grpc.Server({
+    "grpc.max_send_message_length": 1024 * 1024,
+    "grpc.max_receive_message_length": 1024 * 1024,
+});
+server.addService(proto.shometrics.v1.MetricSourceService.service, handlers);
+server.bindAsync(`unix://${SOCKET_PATH}`, grpc.ServerCredentials.createInsecure(), async (err) => {
+    if (err) {
+        console.error("bind failed:", err.message);
+        process.exit(1);
+    }
+    const all = await refreshedSensors();
+    console.log(`serving ${all.size} sensors on ${SOCKET_PATH}`);
+});

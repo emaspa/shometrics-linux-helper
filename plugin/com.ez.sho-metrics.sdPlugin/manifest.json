@@ -1,0 +1,295 @@
+{
+  "$schema": "https://schemas.elgato.com/streamdeck/plugins/manifest.json",
+  "Name": "Sho Metrics - System Monitoring",
+  "Version": "0.2.0.0",
+  "Author": "ez",
+  "Actions": [
+    {
+      "Name": "CPU",
+      "UUID": "com.ez.sho-metrics.cpu",
+      "Icon": "imgs/actions/cpu/icon",
+      "Tooltip": "Displays CPU metrics.",
+      "PropertyInspectorPath": "ui/property-inspector.html",
+      "SupportedInMultiActions": false,
+      "VisibleInActionsList": true,
+      "Controllers": [
+        "Keypad",
+        "Encoder"
+      ],
+      "Encoder": {
+        "Icon": "imgs/actions/sho-metrics/icon",
+        "layout": "$B1"
+      },
+      "UserTitleEnabled": false,
+      "States": [
+        {
+          "Image": "imgs/actions/sho-metrics/key",
+          "ShowTitle": false,
+          "TitleAlignment": "middle"
+        }
+      ]
+    },
+    {
+      "Name": "GPU",
+      "UUID": "com.ez.sho-metrics.gpu",
+      "Icon": "imgs/actions/gpu/icon",
+      "Tooltip": "Displays GPU metrics.",
+      "PropertyInspectorPath": "ui/property-inspector.html",
+      "SupportedInMultiActions": false,
+      "VisibleInActionsList": true,
+      "Controllers": [
+        "Keypad",
+        "Encoder"
+      ],
+      "Encoder": {
+        "Icon": "imgs/actions/sho-metrics/icon",
+        "layout": "$B1"
+      },
+      "UserTitleEnabled": false,
+      "States": [
+        {
+          "Image": "imgs/actions/sho-metrics/key",
+          "ShowTitle": false,
+          "TitleAlignment": "middle"
+        }
+      ]
+    },
+    {
+      "Name": "Memory",
+      "UUID": "com.ez.sho-metrics.memory",
+      "Icon": "imgs/actions/memory/icon",
+      "Tooltip": "Displays memory metrics.",
+      "PropertyInspectorPath": "ui/property-inspector.html",
+      "SupportedInMultiActions": false,
+      "VisibleInActionsList": true,
+      "Controllers": [
+        "Keypad",
+        "Encoder"
+      ],
+      "Encoder": {
+        "Icon": "imgs/actions/sho-metrics/icon",
+        "layout": "$B1"
+      },
+      "UserTitleEnabled": false,
+      "States": [
+        {
+          "Image": "imgs/actions/sho-metrics/key",
+          "ShowTitle": false,
+          "TitleAlignment": "middle"
+        }
+      ]
+    },
+    {
+      "Name": "Disk",
+      "UUID": "com.ez.sho-metrics.disk",
+      "Icon": "imgs/actions/disk/icon",
+      "Tooltip": "Displays disk metrics.",
+      "PropertyInspectorPath": "ui/property-inspector.html",
+      "SupportedInMultiActions": false,
+      "VisibleInActionsList": true,
+      "Controllers": [
+        "Keypad",
+        "Encoder"
+      ],
+      "Encoder": {
+        "Icon": "imgs/actions/sho-metrics/icon",
+        "layout": "$B1"
+      },
+      "UserTitleEnabled": false,
+      "States": [
+        {
+          "Image": "imgs/actions/sho-metrics/key",
+          "ShowTitle": false,
+          "TitleAlignment": "middle"
+        }
+      ]
+    },
+    {
+      "Name": "Network",
+      "UUID": "com.ez.sho-metrics.network",
+      "Icon": "imgs/actions/network/icon",
+      "Tooltip": "Displays network metrics.",
+      "PropertyInspectorPath": "ui/property-inspector.html",
+      "SupportedInMultiActions": false,
+      "VisibleInActionsList": true,
+      "Controllers": [
+        "Keypad",
+        "Encoder"
+      ],
+      "Encoder": {
+        "Icon": "imgs/actions/sho-metrics/icon",
+        "layout": "$B1"
+      },
+      "UserTitleEnabled": false,
+      "States": [
+        {
+          "Image": "imgs/actions/sho-metrics/key",
+          "ShowTitle": false,
+          "TitleAlignment": "middle"
+        }
+      ]
+    },
+    {
+      "Name": "System & Battery",
+      "UUID": "com.ez.sho-metrics.system",
+      "Icon": "imgs/actions/system/icon",
+      "Tooltip": "Displays system and supported device battery metrics.",
+      "PropertyInspectorPath": "ui/property-inspector.html",
+      "SupportedInMultiActions": false,
+      "VisibleInActionsList": true,
+      "Controllers": [
+        "Keypad",
+        "Encoder"
+      ],
+      "Encoder": {
+        "Icon": "imgs/actions/sho-metrics/icon",
+        "layout": "$B1"
+      },
+      "UserTitleEnabled": false,
+      "States": [
+        {
+          "Image": "imgs/actions/sho-metrics/key",
+          "ShowTitle": false,
+          "TitleAlignment": "middle"
+        }
+      ]
+    },
+    {
+      "Name": "Advanced Sensor",
+      "UUID": "com.ez.sho-metrics.catalog-metric",
+      "Icon": "imgs/actions/catalog-metric/icon",
+      "Tooltip": "Displays one selected metric, such as LibreHardwareMonitor data.",
+      "OS": [
+        "windows"
+      ],
+      "PropertyInspectorPath": "ui/property-inspector.html",
+      "SupportedInMultiActions": false,
+      "VisibleInActionsList": true,
+      "Controllers": [
+        "Keypad",
+        "Encoder"
+      ],
+      "Encoder": {
+        "Icon": "imgs/actions/sho-metrics/icon",
+        "layout": "$B1"
+      },
+      "UserTitleEnabled": false,
+      "States": [
+        {
+          "Image": "imgs/actions/sho-metrics/key",
+          "ShowTitle": false,
+          "TitleAlignment": "middle"
+        }
+      ]
+    },
+    {
+      "Name": "Custom Metric",
+      "UUID": "com.ez.sho-metrics.custom-metric",
+      "Icon": "imgs/actions/custom-metric/icon",
+      "Tooltip": "Displays a metric from a custom source, such as HTTP JSON.",
+      "SupportURL": "https://shometrics.github.io/faq/custom-http-metric/",
+      "PropertyInspectorPath": "ui/property-inspector.html",
+      "SupportedInMultiActions": false,
+      "VisibleInActionsList": true,
+      "Controllers": [
+        "Keypad",
+        "Encoder"
+      ],
+      "Encoder": {
+        "Icon": "imgs/actions/sho-metrics/icon",
+        "layout": "$B1"
+      },
+      "UserTitleEnabled": false,
+      "States": [
+        {
+          "Image": "imgs/actions/sho-metrics/key",
+          "ShowTitle": false,
+          "TitleAlignment": "middle"
+        }
+      ]
+    },
+    {
+      "Name": "Dense Multi Metric",
+      "UUID": "com.ez.sho-metrics.dense-multi-metric",
+      "Icon": "imgs/actions/dense-multi-metric/icon",
+      "Tooltip": "Displays multiple metrics in one compact view.",
+      "PropertyInspectorPath": "ui/property-inspector.html",
+      "SupportedInMultiActions": false,
+      "VisibleInActionsList": true,
+      "Controllers": [
+        "Keypad",
+        "Encoder"
+      ],
+      "Encoder": {
+        "Icon": "imgs/actions/sho-metrics/icon",
+        "layout": "$B1"
+      },
+      "UserTitleEnabled": false,
+      "States": [
+        {
+          "Image": "imgs/actions/sho-metrics/key",
+          "ShowTitle": false,
+          "TitleAlignment": "middle"
+        }
+      ]
+    },
+    {
+      "Name": "Stacked Metric",
+      "UUID": "com.ez.sho-metrics.stacked-metric",
+      "Icon": "imgs/actions/stacked-metric/icon",
+      "Tooltip": "Rotates between multiple metric widgets on one key.",
+      "PropertyInspectorPath": "ui/property-inspector.html",
+      "SupportedInMultiActions": false,
+      "VisibleInActionsList": true,
+      "Controllers": [
+        "Keypad",
+        "Encoder"
+      ],
+      "Encoder": {
+        "Icon": "imgs/actions/sho-metrics/icon",
+        "layout": "$B1",
+        "TriggerDescription": {
+          "Push": "Refresh",
+          "Rotate": "Switch metric"
+        }
+      },
+      "UserTitleEnabled": false,
+      "States": [
+        {
+          "Image": "imgs/actions/sho-metrics/key",
+          "ShowTitle": false,
+          "TitleAlignment": "middle"
+        }
+      ]
+    }
+  ],
+  "Category": "Sho Metrics - System Monitoring",
+  "CategoryIcon": "imgs/plugin/category-icon",
+  "CodePath": "bin/plugin.js",
+  "Description": "Display live System metrics such as CPU, GPU, memory, disk, network, battery, sensor metrics, and HTTP metrics.",
+  "Icon": "imgs/plugin/marketplace",
+  "SDKVersion": 3,
+  "Software": {
+    "MinimumVersion": "7.1"
+  },
+  "URL": "https://shometrics.github.io/",
+  "SupportURL": "https://shometrics.github.io/faq/",
+  "OS": [
+    {
+      "Platform": "mac",
+      "MinimumVersion": "12"
+    },
+    {
+      "Platform": "windows",
+      "MinimumVersion": "10"
+    },
+    {
+      "Platform": "linux",
+      "MinimumVersion": "0"
+    }
+  ],
+  "Nodejs": {
+    "Version": "24"
+  },
+  "UUID": "com.ez.sho-metrics"
+}

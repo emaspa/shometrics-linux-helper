@@ -1,0 +1,50 @@
+{
+	"Name": "Sho Metrics - System Monitoring",
+	"Description": "Display live System metrics such as CPU, GPU, memory, disk, network, battery, sensor metrics, and HTTP metrics.",
+	"com.ez.sho-metrics.catalog-metric": {
+		"Name": "Advanced Sensor",
+		"Tooltip": "Displays one selected metric, such as LibreHardwareMonitor data."
+	},
+	"com.ez.sho-metrics.cpu": {
+		"Name": "CPU",
+		"Tooltip": "Displays CPU metrics."
+	},
+	"com.ez.sho-metrics.custom-metric": {
+		"Name": "Custom Metric",
+		"Tooltip": "Displays a metric from a custom source, such as HTTP JSON."
+	},
+	"com.ez.sho-metrics.dense-multi-metric": {
+		"Name": "Dense Multi Metric",
+		"Tooltip": "Displays multiple metrics in one compact view."
+	},
+	"com.ez.sho-metrics.disk": {
+		"Name": "Disk",
+		"Tooltip": "Displays disk metrics."
+	},
+	"com.ez.sho-metrics.gpu": {
+		"Name": "GPU",
+		"Tooltip": "Displays GPU metrics."
+	},
+	"com.ez.sho-metrics.memory": {
+		"Name": "Memory",
+		"Tooltip": "Displays memory metrics."
+	},
+	"com.ez.sho-metrics.network": {
+		"Name": "Network",
+		"Tooltip": "Displays network metrics."
+	},
+	"com.ez.sho-metrics.stacked-metric": {
+		"Name": "Stacked Metric",
+		"Tooltip": "Rotates between multiple metric widgets on one key.",
+		"Encoder": {
+			"TriggerDescription": {
+				"Push": "Refresh",
+				"Rotate": "Switch metric"
+			}
+		}
+	},
+	"com.ez.sho-metrics.system": {
+		"Name": "System & Battery",
+		"Tooltip": "Displays system and supported device battery metrics."
+	}
+}
