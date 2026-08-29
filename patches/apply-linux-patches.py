@@ -27,6 +27,10 @@ PATCHES = [
     # property inspector helper status subscription
     ('"win32"===process.platform&&(I1.subscribe(',
      '("win32"===process.platform||"linux"===process.platform)&&(I1.subscribe('),
+    # runtime context sent to the property inspector: gates the Advanced
+    # Sensor picker UI (isWindows really means helper-capable platform)
+    ('return{isWindows:"win32"===process.platform,',
+     'return{isWindows:"win32"===process.platform||"linux"===process.platform,'),
 ]
 
 path = sys.argv[1]
