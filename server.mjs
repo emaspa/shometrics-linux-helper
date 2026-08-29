@@ -30,13 +30,13 @@ const UNIT = {
 
 // sensor file prefix -> [unit, divisor to canonical unit]
 const HWMON_TYPES = {
-    temp:     { unit: UNIT.CELSIUS,    divisor: 1000,  label: "Temperature" },
-    fan:      { unit: UNIT.RPM,        divisor: 1,     label: "Fan" },
-    in:       { unit: UNIT.VOLTS,      divisor: 1000,  label: "Voltage" },
-    curr:     { unit: UNIT.AMPERES,    divisor: 1000,  label: "Current" },
-    power:    { unit: UNIT.WATTS,      divisor: 1e6,   label: "Power" },
-    energy:   { unit: UNIT.WATT_HOURS, divisor: 3.6e9, label: "Energy" },
-    humidity: { unit: UNIT.PERCENT,    divisor: 1000,  label: "Humidity" },
+    temp:     { unit: UNIT.CELSIUS,    divisor: 1000,  label: "Temperature", lhm: "Temperature" },
+    fan:      { unit: UNIT.RPM,        divisor: 1,     label: "Fan",         lhm: "Fan" },
+    in:       { unit: UNIT.VOLTS,      divisor: 1000,  label: "Voltage",     lhm: "Voltage" },
+    curr:     { unit: UNIT.AMPERES,    divisor: 1000,  label: "Current",     lhm: "Current" },
+    power:    { unit: UNIT.WATTS,      divisor: 1e6,   label: "Power",       lhm: "Power" },
+    energy:   { unit: UNIT.WATT_HOURS, divisor: 3.6e9, label: "Energy",      lhm: "Energy" },
+    humidity: { unit: UNIT.PERCENT,    divisor: 1000,  label: "Humidity",    lhm: "Humidity" },
 };
 
 function readTrimmed(path) {
@@ -51,6 +51,19 @@ function chipDeviceId(hwmonPath) {
     } catch {
         return "virtual";
     }
+}
+
+function addCpuTempAlias(sensors) {
+    // stable alias cpu.temp -> k10temp Tctl (preferred) or its first temp
+    const candidates = [...sensors.values()].filter(s => s.hardwareName === "k10temp");
+    const source = candidates.find(s => s.sensorName === "Tctl") ?? candidates[0];
+    if (!source) return;
+    sensors.set("cpu.temp", {
+        ...source,
+        metricId: "cpu.temp",
+        metricIdKind: 1,
+        sensorName: "CPU Package",
+    });
 }
 
 function enumerateHwmonSensors(sensors) {
@@ -94,7 +107,7 @@ function enumerateHwmonSensors(sensors) {
                 hardwareName: chip,
                 hardwareType: "hwmon",
                 sensorName: label,
-                sensorType: kind,
+                sensorType: type.lhm,
                 pollingGroupId: hardwareId,
                 read: async () => {
                     const raw = parseInt(readTrimmed(inputPath), 10);
@@ -158,7 +171,7 @@ async function enumerateLactSensors(sensors) {
         const base = {
             hardwareId,
             hardwareName: device.name,
-            hardwareType: "gpu-nvidia",
+            hardwareType: "GpuNvidia",
             pollingGroupId: hardwareId,
         };
         const add = (key, sensorName, sensorType, unit, extract) => {
@@ -175,21 +188,40 @@ async function enumerateLactSensors(sensors) {
             });
         };
         for (const tempName of Object.keys(stats.temps ?? {})) {
-            add(`temp.${slug(tempName)}`, tempName, "temp", UNIT.CELSIUS,
+            add(`temp.${slug(tempName)}`, tempName, "Temperature", UNIT.CELSIUS,
                 s => s.temps?.[tempName]?.current);
         }
-        add("fan_rpm", "Fan", "fan", UNIT.RPM, s => s.fan?.speed_current);
-        add("fan_pwm", "Fan PWM", "control", UNIT.PERCENT,
+        add("fan_rpm", "GPU Fan", "Fan", UNIT.RPM, s => s.fan?.speed_current);
+        add("fan_pwm", "GPU Fan PWM", "Control", UNIT.PERCENT,
             s => s.fan?.pwm_current === undefined ? undefined : s.fan.pwm_current / 255 * 100);
-        add("power_draw", "Power Draw", "power", UNIT.WATTS, s => s.power?.current);
-        add("power_cap", "Power Limit", "power", UNIT.WATTS, s => s.power?.cap_current);
-        add("clock_gpu", "GPU Clock", "clock", UNIT.HERTZ,
+        add("power_draw", "GPU Package Power", "Power", UNIT.WATTS, s => s.power?.current);
+        add("power_cap", "Power Limit", "Power", UNIT.WATTS, s => s.power?.cap_current);
+        add("clock_gpu", "GPU Core Clock", "Clock", UNIT.HERTZ,
             s => s.clockspeed?.gpu_clockspeed === undefined ? undefined : s.clockspeed.gpu_clockspeed * 1e6);
-        add("clock_vram", "VRAM Clock", "clock", UNIT.HERTZ,
+        add("clock_vram", "GPU Memory Clock", "Clock", UNIT.HERTZ,
             s => s.clockspeed?.vram_clockspeed === undefined ? undefined : s.clockspeed.vram_clockspeed * 1e6);
-        add("vram_used", "VRAM Used", "data", UNIT.BYTES, s => s.vram?.used);
-        add("vram_total", "VRAM Total", "data", UNIT.BYTES, s => s.vram?.total);
-        add("busy", "GPU Usage", "load", UNIT.PERCENT, s => s.busy_percent);
+        add("vram_used", "GPU Memory Used", "Data", UNIT.BYTES, s => s.vram?.used);
+        add("vram_total", "GPU Memory Total", "Data", UNIT.BYTES, s => s.vram?.total);
+        add("busy", "GPU Core Load", "Load", UNIT.PERCENT, s => s.busy_percent);
+        // stable aliases used by the curated GPU widget metrics
+        const alias = (metricId, sensorName, sensorType, unit, extract, valueKind) => {
+            sensors.set(metricId, {
+                ...base, metricId, unit, sensorName, sensorType,
+                metricIdKind: 1, valueKind: valueKind ?? 1,
+                read: async () => {
+                    const value = extract(await lactStats(device.id));
+                    if (value === undefined || value === null) throw new Error("missing");
+                    return value;
+                },
+            });
+        };
+        alias("gpu.temp", "GPU Core", "Temperature", UNIT.CELSIUS, s => s.temps?.GPU?.current);
+        alias("gpu.usage_percent", "GPU Core Load", "Load", UNIT.PERCENT, s => s.busy_percent);
+        alias("gpu.power", "GPU Package Power", "Power", UNIT.WATTS, s => s.power?.current);
+        alias("gpu.power_limit", "Power Limit", "Power", UNIT.WATTS, s => s.power?.cap_current);
+        alias("gpu.vram_used", "GPU Memory Used", "Data", UNIT.BYTES, s => s.vram?.used);
+        alias("gpu.vram_total", "GPU Memory Total", "Data", UNIT.BYTES, s => s.vram?.total);
+        alias("gpu.model", "GPU Model", "Text", 0, () => device.name, 2);
     }
 }
 
@@ -204,6 +236,7 @@ async function refreshedSensors() {
     enumerating ??= (async () => {
         const next = new Map();
         enumerateHwmonSensors(next);
+        addCpuTempAlias(next);
         try {
             await enumerateLactSensors(next);
         } catch (e) {
@@ -221,9 +254,9 @@ function descriptorFor(sensor) {
     return {
         descriptor: {
             metric_id: sensor.metricId,
-            value_kind: 1, // SCALAR
+            value_kind: sensor.valueKind ?? 1,
             unit: sensor.unit,
-            metric_id_kind: 2, // SOURCE_NATIVE
+            metric_id_kind: sensor.metricIdKind ?? 2,
             polling_group_id: sensor.pollingGroupId,
         },
         raw_sensor_identity: {
@@ -295,7 +328,7 @@ const handlers = {
                 try {
                     const value = await sensor.read();
                     metrics[id] = {
-                        scalar: value,
+                        ...(typeof value === "string" ? { text: value } : { scalar: value }),
                         unit: sensor.unit,
                         metadata: { freshness: 1 /* FRESH */ },
                     };

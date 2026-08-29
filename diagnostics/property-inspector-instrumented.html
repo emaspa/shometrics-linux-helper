@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head><script>
+(function(){
+  function report(kind, msg) {
+    try {
+      const x = new XMLHttpRequest();
+      x.open("POST", "http://127.0.0.1:8766/pilog");
+      x.send(kind + ": " + msg);
+    } catch(e) {}
+  }
+  window.addEventListener("error", e => report("error", (e.message||"?")+" @ "+(e.filename||"?")+":"+(e.lineno||0)));
+  window.addEventListener("unhandledrejection", e => report("rejection", String(e.reason && e.reason.stack || e.reason)));
+  report("boot", "PI loaded, UA: "+navigator.userAgent);
+  // trace the elgato connect call
+  let realConnect = null;
+  Object.defineProperty(window, "connectElgatoStreamDeckSocket", {
+    configurable: true,
+    set(fn) { realConnect = function(...args) { report("connect-called", "port="+args[0]+" uuid="+args[1]+" event="+args[2]); return fn.apply(this, args); }; },
+    get() { return realConnect; }
+  });
+  // wrap whatever fetch is live right now (cors-fetch hook included)
+  let fetchLogged = 0;
+  const origFetch = window.fetch;
+  window.fetch = function(...args) {
+    const url = String(args[0]);
+    if (fetchLogged < 20 && url.indexOf("127.0.0.1:8766") === -1) {
+      fetchLogged++;
+      const p = origFetch.apply(this, args);
+      p.then(r => report("fetch-ok", url + " status=" + r.status),
+             e => report("fetch-fail", url + " err=" + String(e).slice(0, 120)));
+      return p;
+    }
+    return origFetch.apply(this, args);
+  };
+  // independent websocket probe
+  setTimeout(() => {
+    try {
+      const ws = new WebSocket("ws://127.0.0.1:57116");
+      ws.onopen = () => { report("ws-probe", "OPEN ok"); ws.close(); };
+      ws.onerror = () => report("ws-probe", "ERROR event");
+      ws.onclose = (e) => report("ws-probe", "CLOSE code="+e.code+" clean="+e.wasClean);
+    } catch (e) { report("ws-probe", "THROW "+e.message); }
+  }, 1000);
+})();
+</script>
+    <title>ShoMetrics Settings</title>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="./property-inspector.css" />
+</head>
+
+<body>
+    <main id="property-inspector-root"></main>
+    <script type="module" src="./property-inspector.js"></script>
+</body>
+
+</html>
