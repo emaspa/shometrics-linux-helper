@@ -2,6 +2,8 @@
 
 Beautiful hardware sensor widgets on your Stream Deck, on Linux.
 
+![Sensor keys on a Stream Deck + XL: power and VRAM gauges, GPU hotspot, per-pin 12VHPWR current, fan RPMs, in-game FPS](docs/deck-sensors.png)
+
 This project ports the [Sho Metrics](https://github.com/ShoMetrics/sho_metrics)
 Stream Deck plugin (officially Windows/macOS) to Linux under
 [OpenDeck](https://github.com/nekename/OpenDeck), and replaces its Windows-only
