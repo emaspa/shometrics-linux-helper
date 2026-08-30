@@ -36,8 +36,14 @@ BACKEND_PATCHES = [
     # PI's early runtime-connection ping arrives and every reply is dropped.
     ('const Mn=new class{#m;#g=0;constructor(){this.onDidAppear(e=>{',
      'const Mn=new class{#m;#g=0;constructor(){qt.disposableOn("sendToPlugin",'
-     't=>{if(!this.#m){const n=dn.getActionById(t.context);n&&(this.#g=1,this.#m=n)}}),'
+     't=>{const n=dn.getActionById(t.context);n&&(this.#g=1,this.#m=n)}),'
      'this.onDidAppear(e=>{'),
+    # 7b: answer the PI runtime-connection ping via the event's own context.
+    # With several PI iframes pinging (OpenDeck mounts them all), the
+    # ui.current-based reply raced the presence tracker and answered the
+    # previous pinger.
+    ('return void Dn.ui.sendToPropertyInspector((n=t.requestId,{type:YN,command:"pong",requestId:n}));var n;',
+     'return void qt.send({event:"sendToPropertyInspector",context:e.action.id,payload:{type:YN,command:"pong",requestId:t.requestId}});var n;'),
     # 9: localSourceSupportsMetricOnPlatform: the source router strips the
     # helper from every candidate list off-Windows, leaving catalog metrics
     # with no source at all (empty selectedSourceId, permanent "no data").
