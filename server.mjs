@@ -8,7 +8,7 @@
 //     clocks, VRAM usage, utilization) when /run/lactd.sock is available
 import grpc from "@grpc/grpc-js";
 import protoLoader from "@grpc/proto-loader";
-import { readdirSync, readFileSync, readlinkSync, mkdirSync, rmSync, existsSync } from "node:fs";
+import { readdirSync, readFileSync, readlinkSync, mkdirSync, rmSync, existsSync, openSync, readSync, fstatSync, closeSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
 import { connect } from "node:net";
 
@@ -23,7 +23,7 @@ const LACT_STATS_CACHE_MS = 900;
 
 const UNIT = {
     PERCENT: 1, CELSIUS: 2, VOLTS: 3, AMPERES: 4, WATTS: 5,
-    HERTZ: 6, BYTES: 7, RPM: 9, WATT_HOURS: 13,
+    HERTZ: 6, BYTES: 7, RPM: 9, UNITLESS: 11, WATT_HOURS: 13, MILLISECONDS: 16,
 };
 
 // ---------------------------------------------------------------- hwmon source
@@ -225,6 +225,101 @@ async function enumerateLactSensors(sensors) {
     }
 }
 
+
+// --------------------------------------------------------- MangoHud FPS source
+
+const MANGOHUD_DIR = process.env.MANGOHUD_LOG_DIR
+    ?? join(process.env.HOME ?? "/root", "mangohud_logs");
+const MANGOHUD_FRESH_MS = 8000;
+const MANGOHUD_CACHE_MS = 500;
+
+function newestMangohudLog() {
+    let files;
+    try {
+        files = readdirSync(MANGOHUD_DIR).filter(f => f.endsWith(".csv"));
+    } catch {
+        return undefined;
+    }
+    let best;
+    for (const f of files) {
+        try {
+            const path = join(MANGOHUD_DIR, f);
+            const st = statSync(path);
+            if (!best || st.mtimeMs > best.mtimeMs) best = { path, mtimeMs: st.mtimeMs };
+        } catch { /* file vanished mid-scan */ }
+    }
+    return best;
+}
+
+let mangohudCache = { at: 0, data: undefined };
+
+// Parses the tail of the newest MangoHud CSV (columns: fps,frametime,...).
+// Throws when no game has logged recently, which surfaces as metric-unavailable.
+function readMangohudStats() {
+    if (Date.now() - mangohudCache.at < MANGOHUD_CACHE_MS) {
+        if (mangohudCache.data) return mangohudCache.data;
+        throw new Error("no fresh mangohud log");
+    }
+    mangohudCache = { at: Date.now(), data: undefined };
+    const log = newestMangohudLog();
+    if (!log || Date.now() - log.mtimeMs > MANGOHUD_FRESH_MS) {
+        throw new Error("no fresh mangohud log");
+    }
+    const fd = openSync(log.path, "r");
+    let text;
+    try {
+        const size = fstatSync(fd).size;
+        const length = Math.min(size, 65536);
+        const buffer = Buffer.alloc(length);
+        readSync(fd, buffer, 0, length, size - length);
+        text = buffer.toString("utf8");
+    } finally {
+        closeSync(fd);
+    }
+    const rows = [];
+    for (const line of text.split("\n").slice(1)) { // first line may be partial
+        const parts = line.split(",");
+        if (parts.length < 2) continue;
+        const fps = parseFloat(parts[0]);
+        const frametime = parseFloat(parts[1]);
+        if (Number.isFinite(fps) && Number.isFinite(frametime) && fps >= 0) {
+            rows.push({ fps, frametime });
+        }
+    }
+    if (rows.length === 0) throw new Error("no data rows yet");
+    const window = rows.slice(-120);
+    const recent = window.slice(-3);
+    const frametimes = window.map(r => r.frametime).sort((a, b) => a - b);
+    const p99 = frametimes[Math.min(frametimes.length - 1, Math.floor(frametimes.length * 0.99))];
+    const data = {
+        fps: recent.reduce((a, r) => a + r.fps, 0) / recent.length,
+        frametime: recent[recent.length - 1].frametime,
+        low1: p99 > 0 ? 1000 / p99 : 0,
+    };
+    mangohudCache.data = data;
+    return data;
+}
+
+function enumerateMangohudSensors(sensors) {
+    if (!existsSync(MANGOHUD_DIR)) return;
+    const base = {
+        hardwareId: "mangohud",
+        hardwareName: "MangoHud",
+        hardwareType: "Game",
+        pollingGroupId: "mangohud",
+    };
+    const add = (key, sensorName, sensorType, unit, extract) => {
+        const metricId = `linux-mangohud.${key}`;
+        sensors.set(metricId, {
+            ...base, metricId, unit, sensorName, sensorType,
+            read: async () => extract(readMangohudStats()),
+        });
+    };
+    add("fps", "FPS", "Level", UNIT.UNITLESS, s => s.fps);
+    add("fps_1pct_low", "FPS 1% Low", "Level", UNIT.UNITLESS, s => s.low1);
+    add("frametime", "Frametime", "Timing", UNIT.MILLISECONDS, s => s.frametime);
+}
+
 // ------------------------------------------------------------------- catalog
 
 let sensors = new Map();
@@ -237,6 +332,11 @@ async function refreshedSensors() {
         const next = new Map();
         enumerateHwmonSensors(next);
         addCpuTempAlias(next);
+        try {
+            enumerateMangohudSensors(next);
+        } catch (e) {
+            console.error("mangohud enumeration failed:", e.message);
+        }
         try {
             await enumerateLactSensors(next);
         } catch (e) {
