@@ -38,6 +38,11 @@ BACKEND_PATCHES = [
      'const Mn=new class{#m;#g=0;constructor(){qt.disposableOn("sendToPlugin",'
      't=>{if(!this.#m){const n=dn.getActionById(t.context);n&&(this.#g=1,this.#m=n)}}),'
      'this.onDidAppear(e=>{'),
+    # 9: localSourceSupportsMetricOnPlatform: the source router strips the
+    # helper from every candidate list off-Windows, leaving catalog metrics
+    # with no source at all (empty selectedSourceId, permanent "no data").
+    ('case Oo:return"win32"===n;',
+     'case Oo:return"win32"===n||"linux"===n;'),
 ]
 
 # 8: the PI receives platform "linux" from OpenDeck's make_info (only wine
