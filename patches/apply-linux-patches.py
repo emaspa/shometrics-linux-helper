@@ -57,6 +57,12 @@ PI_PATCHES = [
     ('l="win32"===o', 'l="win32"===o||"linux"===o'),
     ('function hI(e){return"win32"===e}', 'function hI(e){return"win32"===e||"linux"===e}'),
     ('case iI:return"win32"===n;', 'case iI:return"win32"===n||"linux"===n;'),
+    # 8b: give amperes sensors their own "Current" category in the Advanced
+    # Sensor picker (upstream files them under "Other"; wireview exposes 7)
+    ('case"voltage":return"voltage";case"power":return"power";',
+     'case"current":return"current";case"voltage":return"voltage";case"power":return"power";'),
+    ('clock:"Clock",voltage:"Voltage",power:"Power",fan:"Fan",',
+     'clock:"Clock",voltage:"Voltage",current:"Current",power:"Power",fan:"Fan",'),
 ]
 
 
