@@ -44,6 +44,23 @@ BACKEND_PATCHES = [
     # previous pinger.
     ('return void Dn.ui.sendToPropertyInspector((n=t.requestId,{type:YN,command:"pong",requestId:n}));var n;',
      'return void qt.send({event:"sendToPropertyInspector",context:e.action.id,payload:{type:YN,command:"pong",requestId:t.requestId}});var n;'),
+    # 10: one-decimal displayValue for amps/volts/watts catalog metrics
+    ('return{value:j0(e/1e9,1,3),unit:"GHz"}}(t);default:return}',
+     'return{value:j0(e/1e9,1,3),unit:"GHz"}}(t);'
+     'case To.AMPERES:return{value:t.toFixed(1),unit:"A"};'
+     'case To.VOLTS:return{value:t.toFixed(1),unit:"V"};'
+     'case To.WATTS:return{value:t.toFixed(1),unit:"W"};'
+     'default:return}'),
+    # 11: bar view on uncategorized hardware: title by reading kind (the
+    # sensor label already renders at the bottom), icon by reading kind
+    ('l=s3("bar"===a?N3[e.target.detectedCategory]:o??i,s)??W3',
+     'l=s3("bar"!==a?o??i:"other"!==e.target.detectedCategory&&"unspecified"!==e.target.detectedCategory'
+     '?N3[e.target.detectedCategory]'
+     ':o??{temperature:"Temperature",usage:"Usage",clock:"Clock",voltage:"Voltage",current:"Current",'
+     'power:"Power",fan:"Fan",control:"Control",data:"Data",throughput:"Throughput",timing:"Timing",'
+     'level:"Level"}[e.target.detectedReadingKind]??i,s)??W3'),
+    ('function P3(e){const t=A0({hardware:e.detectedCategory,status:T3(e.detectedReadingKind)});return{...t,centerIconFragment:ZP(e.customIconId)??t.centerIconFragment}}',
+     'function P3(e){const t=A0({hardware:e.detectedCategory,status:T3(e.detectedReadingKind)});const n="other"===e.detectedCategory||"unspecified"===e.detectedCategory?M0(w0(T3(e.detectedReadingKind)),58):void 0;return{...t,centerIconFragment:ZP(e.customIconId)??n??t.centerIconFragment}}'),
     # 9: localSourceSupportsMetricOnPlatform: the source router strips the
     # helper from every candidate list off-Windows, leaving catalog metrics
     # with no source at all (empty selectedSourceId, permanent "no data").
@@ -63,6 +80,11 @@ PI_PATCHES = [
      'case"current":return"current";case"voltage":return"voltage";case"power":return"power";'),
     ('clock:"Clock",voltage:"Voltage",power:"Power",fan:"Fan",',
      'clock:"Clock",voltage:"Voltage",current:"Current",power:"Power",fan:"Fan",'),
+    # 8b (cont): category order map and i18n label for Current
+    ('{temperature:0,usage:1,clock:2,voltage:3,power:4,fan:5,control:6,data:7,throughput:8,timing:9,other:10}',
+     '{temperature:0,usage:1,clock:2,voltage:3,current:4,power:5,fan:6,control:7,data:8,throughput:9,timing:10,other:11}'),
+    ('case"voltage":return t.t(ns.voltageOption);case"power":return t.t(ns.powerOption);',
+     'case"voltage":return t.t(ns.voltageOption);case"current":return"Current";case"power":return t.t(ns.powerOption);'),
 ]
 
 
