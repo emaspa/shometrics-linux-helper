@@ -61,6 +61,10 @@ BACKEND_PATCHES = [
      'level:"Level"}[e.target.detectedReadingKind]??i,s)??W3'),
     ('function P3(e){const t=A0({hardware:e.detectedCategory,status:T3(e.detectedReadingKind)});return{...t,centerIconFragment:ZP(e.customIconId)??t.centerIconFragment}}',
      'function P3(e){const t=A0({hardware:e.detectedCategory,status:T3(e.detectedReadingKind)});const n="other"===e.detectedCategory||"unspecified"===e.detectedCategory?M0(w0(T3(e.detectedReadingKind)),58):void 0;return{...t,centerIconFragment:ZP(e.customIconId)??n??t.centerIconFragment}}'),
+    # 12: default maximum for amperes catalog metrics: 12A (a 12V-2x6 pin's
+    # working range) instead of 100A, so current bars actually move. Keys
+    # showing rail totals should set a per-key custom Maximum instead.
+    ('case To.AMPERES:return 100;', 'case To.AMPERES:return 12;'),
     # 9: localSourceSupportsMetricOnPlatform: the source router strips the
     # helper from every candidate list off-Windows, leaving catalog metrics
     # with no source at all (empty selectedSourceId, permanent "no data").
@@ -85,6 +89,8 @@ PI_PATCHES = [
      '{temperature:0,usage:1,clock:2,voltage:3,current:4,power:5,fan:6,control:7,data:8,throughput:9,timing:10,other:11}'),
     ('case"voltage":return t.t(ns.voltageOption);case"power":return t.t(ns.powerOption);',
      'case"voltage":return t.t(ns.voltageOption);case"current":return"Current";case"power":return t.t(ns.powerOption);'),
+    # 12 (PI counterpart): preview scaling matches the 12A default
+    ('case EC.AMPERES:return 100;', 'case EC.AMPERES:return 12;'),
 ]
 
 
