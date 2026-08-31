@@ -326,8 +326,14 @@ let sensors = new Map();
 let lastEnumeratedAt = 0;
 let enumerating = null;
 
+function lactAppearedSinceLastEnumeration() {
+    return existsSync(LACT_SOCKET)
+        && ![...sensors.keys()].some(id => id.startsWith("linux-nvidia."));
+}
+
 async function refreshedSensors() {
-    if (Date.now() - lastEnumeratedAt < ENUMERATE_INTERVAL_MS) return sensors;
+    const withinInterval = Date.now() - lastEnumeratedAt < ENUMERATE_INTERVAL_MS;
+    if (withinInterval && !lactAppearedSinceLastEnumeration()) return sensors;
     enumerating ??= (async () => {
         const next = new Map();
         enumerateHwmonSensors(next);

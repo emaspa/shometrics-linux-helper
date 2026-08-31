@@ -2,6 +2,9 @@
 Description=Sho Metrics Linux hwmon helper (gRPC over unix socket)
 
 [Service]
+# Give lactd (system service) time to create its socket at boot so the first
+# sensor enumeration includes the NVIDIA GPU. Non-fatal: proceeds without it.
+ExecStartPre=/bin/sh -c 'i=0; while [ $i -lt 30 ] && [ ! -S /run/lactd.sock ]; do sleep 0.5; i=$((i+1)); done; exit 0'
 ExecStart=/usr/bin/node %h/shometrics-linux-helper/server.mjs
 Restart=on-failure
 
