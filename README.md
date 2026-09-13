@@ -1,5 +1,23 @@
 # Sho Metrics for Linux
 
+> **This repo has moved.** After the upstream author endorsed an independent
+> fork in [ShoMetrics/sho_metrics#5](https://github.com/ShoMetrics/sho_metrics/issues/5),
+> development continues in
+> **[emaspa/sho-metrics-linux](https://github.com/emaspa/sho-metrics-linux)**:
+>
+> - The helper daemon now lives in the fork at
+>   [`packages/source-linux`](https://github.com/emaspa/sho-metrics-linux/tree/linux/packages/source-linux)
+>   — same service name, same socket, `./install.sh` to set it up.
+> - The plugin is built from the fork's source as **Sho Metrics Linux**
+>   (`com.ez.sho-metrics-linux`); get `ShoMetrics-Linux.streamDeckPlugin`
+>   from the fork's Releases instead of patching the official bundle.
+> - The patch set below (`patches/`) and the pre-patched plugin releases are
+>   historical, kept for the official v0.2.0 plugin. `docs/ROADMAP.md` has
+>   the fork plan.
+>
+> This repository keeps the port's development history and the `diagnostics/`
+> tools.
+
 Beautiful hardware sensor widgets on your Stream Deck, on Linux.
 
 ![Sensor keys on a Stream Deck + XL: power and VRAM gauges, GPU hotspot, per-pin 12VHPWR current, fan RPMs, in-game FPS](docs/deck-sensors.png)
